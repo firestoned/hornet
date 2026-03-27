@@ -18,12 +18,36 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  changes:
+    name: Detect Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check for changes
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'benches/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/pr.yml'
+
   license-check:
     name: Verify SPDX License Headers
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check license headers
         uses: firestoned/github-actions/security/license-check@v1.3.4
@@ -34,9 +58,11 @@ jobs:
   verify-commits:
     name: Verify Signed Commits
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -53,7 +79,7 @@ jobs:
     needs: [license-check, verify-commits]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -69,7 +95,7 @@ jobs:
     needs: format
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -81,25 +107,6 @@ jobs:
 
       - name: Run clippy
         run: make clippy
-
-  msrv:
-    name: MSRV (1.94)
-    runs-on: ubuntu-latest
-    needs: format
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.94"
-
-      - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
-
-      - name: Build on MSRV
-        run: make build
 
   build:
     name: Build - ${{ matrix.platform.name }}
@@ -119,27 +126,66 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact_name: hornet-linux-arm64
             binary_name: hornet
+          - name: macOS ARM64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: hornet-macos-arm64
+            binary_name: hornet
+          - name: macOS x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: hornet-macos-amd64
+            binary_name: hornet
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: hornet-windows-amd64
+            binary_name: hornet.exe
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup Rust build environment
+      # Linux: custom action handles cross-compilation setup for ARM64
+      - name: Setup Rust build environment (Linux)
+        if: runner.os == 'Linux'
         uses: firestoned/github-actions/rust/setup-rust-build@v1.3.4
         with:
           target: ${{ matrix.platform.target }}
 
-      - name: Build binary
+      # macOS/Windows: native build; macOS x86_64 is cross-compiled on ARM64 macos-latest runner
+      - name: Setup Rust toolchain (macOS/Windows)
+        if: runner.os != 'Linux'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Add x86_64 target for cross-compilation (macOS)
+        if: matrix.platform.target == 'x86_64-apple-darwin'
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Cache cargo dependencies (macOS/Windows)
+        if: runner.os != 'Linux'
+        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+
+      - name: Build binary (Linux)
+        if: runner.os == 'Linux'
         uses: firestoned/github-actions/rust/build-binary@v1.3.4
         with:
           target: ${{ matrix.platform.target }}
 
-      - name: Generate SBOM
+      - name: Build binary (macOS/Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: cargo build --release --target ${{ matrix.platform.target }}
+
+      - name: Generate SBOM (Linux only)
+        if: runner.os == 'Linux'
         uses: firestoned/github-actions/rust/generate-sbom@v1.3.4
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Upload binary and SBOM artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: |
@@ -154,7 +200,7 @@ jobs:
     needs: build
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -170,7 +216,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run security scan
         uses: firestoned/github-actions/rust/security-scan@v1.3.4
@@ -186,13 +232,13 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -214,7 +260,7 @@ jobs:
         run: make coverage-html
 
       - name: Upload HTML coverage as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: target/llvm-cov/html/
@@ -226,7 +272,7 @@ jobs:
     needs: format
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -324,6 +324,9 @@ fn built_in_acls() -> Vec<String> {
         .to_vec()
 }
 
+#[cfg(test)]
+mod mod_tests;
+
 // ── Zone file validation ───────────────────────────────────────────────────────
 
 /// Run all validations on a parsed zone file.

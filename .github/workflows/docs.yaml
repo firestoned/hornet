@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Erick Bourgeois, firestoned
 # SPDX-License-Identifier: MIT
 
-name: Documentation
+name: Documentation build and publish
 
 on:
   push:

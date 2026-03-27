@@ -67,3 +67,6 @@ pub struct ErrorLocation {
 
 /// Convenience alias.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod error_tests;

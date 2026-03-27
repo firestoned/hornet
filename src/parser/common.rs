@@ -202,3 +202,6 @@ pub fn semicolon(input: &mut &str) -> ModalResult<()> {
 pub fn close_brace_semi(input: &mut &str) -> ModalResult<()> {
     (ws, '}', ws, ';', ws).void().parse_next(input)
 }
+
+#[cfg(test)]
+mod common_tests;
