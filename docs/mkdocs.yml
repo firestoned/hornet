@@ -1,0 +1,201 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
+# Hornet Documentation - MkDocs Material Configuration
+
+site_name: Hornet - BIND9 Config Parser for Rust
+site_url: https://firestoned.github.io/hornet/
+site_description: A fast, comprehensive Rust library for parsing, writing, and validating BIND9 named.conf configuration files and DNS zone files.
+site_author: Erick Bourgeois
+
+# Repository
+repo_url: https://github.com/firestoned/hornet
+repo_name: firestoned/hornet
+edit_uri: edit/main/docs/src/
+
+# Documentation source directory (relative to mkdocs.yml location)
+docs_dir: src
+site_dir: site
+
+# Copyright
+copyright: Copyright &copy; 2025 Erick Bourgeois, firestoned
+
+# Configuration
+theme:
+  name: material
+  language: en
+
+  # Color palette — black and amber/yellow hornet theme
+  palette:
+    # Light mode
+    - scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Dark mode
+    - scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  # Font configuration
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+  # Features
+  features:
+    # Navigation
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - navigation.top
+
+    # Table of contents
+    - toc.follow
+
+    # Search
+    - search.suggest
+    - search.highlight
+    - search.share
+
+    # Header
+    - header.autohide
+
+    # Content
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+# Plugins
+plugins:
+  - search:
+      lang: en
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+      fallback_to_build_date: true
+      enable_git_follow: false
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Anchor link to this section
+      toc_depth: 3
+
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_div_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Extra CSS
+extra_css:
+  - stylesheets/extra.css
+
+# Extra JavaScript
+extra_javascript:
+  - https://unpkg.com/mermaid@11.12.2/dist/mermaid.min.js
+  - javascripts/mermaid-init.js
+
+# Extra configuration
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/firestoned/hornet
+      name: Hornet on GitHub
+  generator: true
+
+# Navigation structure
+nav:
+  - Home: index.md
+
+  - Getting Started:
+      - Quick Start: installation/quickstart.md
+      - Prerequisites: installation/prerequisites.md
+      - Installation: installation/installation.md
+
+  - Concepts:
+      - Overview: concepts/index.md
+      - Architecture: concepts/architecture.md
+      - named.conf Format: concepts/named-conf.md
+      - Zone Files: concepts/zone-files.md
+
+  - User Guide:
+      - Parsing: guide/parsing.md
+      - Writing & Formatting: guide/writing.md
+      - Validating: guide/validating.md
+      - Serde Integration: guide/serde.md
+
+  - CLI Reference:
+      - Overview: cli/index.md
+      - parse: cli/parse.md
+      - zone: cli/zone.md
+      - check: cli/check.md
+      - check-zone: cli/check-zone.md
+      - fmt: cli/fmt.md
+      - convert: cli/convert.md
+
+  - Developer Guide:
+      - Setup: development/setup.md
+      - Testing: development/testing.md
+      - Contributing: development/contributing.md
+
+  - Reference:
+      - Overview: reference/index.md
+      - named.conf Constructs: reference/named-conf-constructs.md
+      - Zone Record Types: reference/zone-record-types.md
+      - WriteOptions: reference/write-options.md
+      - Error Types: reference/error-types.md
+      - Benchmarks: reference/benchmarks.md
+      - Changelog: reference/changelog.md

@@ -1,0 +1,105 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.rs'
+      - 'benches/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+    inputs:
+      run_stress:
+        description: 'Also run stress benchmarks (10k / 100k zones)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Standard benchmarks (tiny → xlarge 1k zones) ────────────────────────────
+  # Runs on native hardware for both architectures so timing numbers are
+  # meaningful and not skewed by QEMU emulation.
+  benchmark:
+    name: Benchmarks — ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            artifact: criterion-report-linux-amd64
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            artifact: criterion-report-linux-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+
+      - name: Run standard benchmarks
+        run: make bench-quick
+
+      - name: Upload criterion HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact }}
+          path: target/criterion/
+          retention-days: 30
+
+  # ── Stress benchmarks (10k / 100k zones) ────────────────────────────────────
+  # Only triggered manually via workflow_dispatch with run_stress=true.
+  # Each iteration takes multiple seconds; criterion is configured with
+  # sample_size(10) to keep total runtime reasonable (~10–30 min per arch).
+  benchmark-stress:
+    name: Stress Benchmarks — ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_stress == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            artifact: criterion-stress-linux-amd64
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            artifact: criterion-stress-linux-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+
+      - name: Run stress benchmarks
+        run: make bench-stress
+
+      - name: Upload stress criterion HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact }}
+          path: target/criterion/
+          retention-days: 30

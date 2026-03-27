@@ -1,0 +1,336 @@
+/* Copyright (c) 2025 Erick Bourgeois, firestoned
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
+ * Hornet Documentation - Custom Styles for MkDocs Material
+ *
+ * Color Palette: Black and Yellow — Hornet brand colors
+ *   Primary: #1A1A1A (near-black)
+ *   Accent:  #FFC107 (hornet amber/yellow)
+ */
+
+/* ============================================
+   Custom Color Overrides - Hornet Theme
+   ============================================ */
+
+:root {
+    --md-primary-fg-color:              #1A1A1A;
+    --md-primary-fg-color--light:       #333333;
+    --md-primary-fg-color--dark:        #000000;
+    --md-accent-fg-color:               #FFC107;
+    --md-accent-fg-color--transparent:  rgba(255, 193, 7, 0.15);
+
+    /* Yellow tint for link hover in light mode */
+    --hornet-yellow:        #FFC107;
+    --hornet-yellow-dark:   #F9A825;
+    --hornet-yellow-light:  #FFD54F;
+    --hornet-black:         #1A1A1A;
+}
+
+[data-md-color-scheme="slate"] {
+    --md-primary-fg-color:              #1A1A1A;
+    --md-primary-fg-color--light:       #2C2C2C;
+    --md-primary-fg-color--dark:        #000000;
+    --md-accent-fg-color:               #FFD54F;
+    --md-accent-fg-color--transparent:  rgba(255, 213, 79, 0.15);
+
+    /* Slightly brighter yellow on dark backgrounds */
+    --hornet-yellow:        #FFD54F;
+    --hornet-yellow-dark:   #FFC107;
+    --hornet-yellow-light:  #FFECB3;
+}
+
+/* ============================================
+   Header & Navigation Bar — pure black
+   ============================================ */
+
+.md-header {
+    background-color: #000000;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
+}
+
+.md-header__title {
+    color: var(--hornet-yellow);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+.md-header__button {
+    color: var(--hornet-yellow) !important;
+}
+
+.md-header__button:hover {
+    color: #ffffff !important;
+}
+
+/* ============================================
+   Navigation Tabs
+   ============================================ */
+
+.md-tabs {
+    background-color: #111111;
+}
+
+.md-tabs__link {
+    color: rgba(255, 255, 255, 0.7) !important;
+    transition: color 0.2s ease;
+}
+
+.md-tabs__link:hover,
+.md-tabs__link--active {
+    color: var(--hornet-yellow) !important;
+}
+
+/* ============================================
+   Sidebar Navigation
+   ============================================ */
+
+.md-nav__link:hover {
+    color: var(--hornet-yellow);
+}
+
+.md-nav__link--active {
+    color: var(--hornet-yellow);
+    font-weight: 600;
+}
+
+/* ============================================
+   Right-side Page TOC
+   ============================================ */
+
+.md-sidebar--secondary .md-sidebar__scrollwrap {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 193, 7, 0.3) transparent;
+}
+
+.md-sidebar--secondary .md-sidebar__scrollwrap::-webkit-scrollbar {
+    width: 6px;
+}
+
+.md-sidebar--secondary .md-sidebar__scrollwrap::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.md-sidebar--secondary .md-sidebar__scrollwrap::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 193, 7, 0.3);
+    border-radius: 3px;
+}
+
+.md-nav--secondary .md-nav__link:hover {
+    color: var(--md-accent-fg-color);
+}
+
+.md-nav--secondary .md-nav__link.md-nav__link--active {
+    font-weight: 500;
+    color: var(--md-accent-fg-color);
+}
+
+/* ============================================
+   Accent / Links
+   ============================================ */
+
+.md-typeset a {
+    color: var(--hornet-yellow-dark);
+}
+
+.md-typeset a:hover {
+    color: var(--hornet-yellow);
+    text-decoration: underline;
+}
+
+[data-md-color-scheme="slate"] .md-typeset a {
+    color: var(--hornet-yellow);
+}
+
+[data-md-color-scheme="slate"] .md-typeset a:hover {
+    color: var(--hornet-yellow-light);
+}
+
+/* ============================================
+   Buttons & CTAs
+   ============================================ */
+
+.md-button {
+    border-color: var(--hornet-yellow);
+    color: var(--hornet-yellow);
+}
+
+.md-button:hover,
+.md-button:focus {
+    background-color: var(--hornet-yellow);
+    border-color: var(--hornet-yellow);
+    color: #000000;
+}
+
+.md-button--primary {
+    background-color: var(--hornet-yellow);
+    border-color: var(--hornet-yellow);
+    color: #000000;
+    font-weight: 600;
+}
+
+.md-button--primary:hover,
+.md-button--primary:focus {
+    background-color: var(--hornet-yellow-dark);
+    border-color: var(--hornet-yellow-dark);
+    color: #000000;
+}
+
+/* ============================================
+   Search bar
+   ============================================ */
+
+.md-search__form {
+    background-color: rgba(255, 193, 7, 0.08);
+}
+
+.md-search__form:hover {
+    background-color: rgba(255, 193, 7, 0.15);
+}
+
+/* ============================================
+   Footer
+   ============================================ */
+
+.md-footer {
+    background-color: #000000;
+}
+
+.md-footer-meta {
+    background-color: #0A0A0A;
+}
+
+/* ============================================
+   Mermaid Diagram Enhancements
+   ============================================ */
+
+.mermaid {
+    text-align: center;
+    margin: 1.5rem 0;
+}
+
+.mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+
+pre.mermaid {
+    overflow-x: auto;
+    padding: 1rem;
+    border-radius: 0.2rem;
+    background-color: var(--md-code-bg-color);
+}
+
+[data-md-color-scheme="slate"] .mermaid {
+    filter: invert(0.9) hue-rotate(180deg);
+}
+
+/* ============================================
+   Code Block Enhancements
+   ============================================ */
+
+.highlight pre {
+    padding: 1rem;
+    overflow-x: auto;
+    line-height: 1.5;
+}
+
+.md-clipboard {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+}
+
+/* ============================================
+   Admonition Customization
+   ============================================ */
+
+.admonition {
+    margin: 1.5rem 0;
+}
+
+/* ============================================
+   Table Styling
+   ============================================ */
+
+.md-typeset table:not([class]) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+}
+
+.md-typeset table:not([class]) th {
+    font-weight: 600;
+    background-color: var(--hornet-black);
+    color: var(--hornet-yellow);
+    border-bottom: 2px solid var(--hornet-yellow);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+    background-color: #000000;
+    color: var(--hornet-yellow);
+    border-bottom: 2px solid var(--hornet-yellow);
+}
+
+/* ============================================
+   Mobile Responsiveness
+   ============================================ */
+
+@media screen and (max-width: 76.1875em) {
+    .md-sidebar--secondary {
+        display: none;
+    }
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+
+@media print {
+    .md-header,
+    .md-tabs,
+    .md-sidebar,
+    .md-footer {
+        display: none !important;
+    }
+
+    .md-content {
+        max-width: 100% !important;
+    }
+
+    .highlight pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+}
+
+/* ============================================
+   General Improvements
+   ============================================ */
+
+html {
+    scroll-behavior: smooth;
+}
+
+a:focus,
+button:focus {
+    outline: 2px solid var(--md-accent-fg-color);
+    outline-offset: 2px;
+}
+
+.headerlink {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    margin-left: 0.5rem;
+}
+
+h1:hover .headerlink,
+h2:hover .headerlink,
+h3:hover .headerlink,
+h4:hover .headerlink,
+h5:hover .headerlink,
+h6:hover .headerlink {
+    opacity: 1;
+}

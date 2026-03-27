@@ -1,0 +1,48 @@
+[package]
+name         = "hornet"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.74"
+license      = "MIT"
+repository   = "https://github.com/firestoned/hornet"
+homepage     = "https://github.com/firestoned/hornet"
+description  = "Parse, write, and validate BIND9 named.conf configuration files and DNS zone files"
+keywords     = ["dns", "bind9", "parser", "named-conf", "zone-file"]
+categories   = ["parser-implementations", "command-line-utilities"]
+authors      = ["Erick Bourgeois <erick@firestoned.io>"]
+
+[lib]
+name = "hornet"
+path = "src/lib.rs"
+
+[[bin]]
+name             = "hornet"
+path             = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli     = ["dep:clap"]
+serde   = ["dep:serde"]
+
+[dependencies]
+winnow    = "0.6"
+thiserror = "1"
+miette    = { version = "7", features = ["fancy"] }
+clap      = { version = "=4.4.18", features = ["derive", "color"], optional = true }
+serde     = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name    = "named_conf"
+harness = false
+
+[[bench]]
+name    = "zone_file"
+harness = false
+
+[[bench]]
+name    = "named_conf_stress"
+harness = false
