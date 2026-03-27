@@ -326,3 +326,6 @@ pub struct GenerateDirective {
     pub rtype: String,
     pub rhs: String,
 }
+
+#[cfg(test)]
+mod zone_file_tests;

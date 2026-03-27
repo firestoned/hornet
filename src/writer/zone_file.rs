@@ -278,3 +278,6 @@ fn ttl_display(secs: u32) -> String {
     }
     secs.to_string()
 }
+
+#[cfg(test)]
+mod zone_file_tests;

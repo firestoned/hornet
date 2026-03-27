@@ -695,3 +695,6 @@ fn skip_line(input: &mut &str) -> ModalResult<()> {
     let _ = rest_of_line(input)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod zone_file_tests;

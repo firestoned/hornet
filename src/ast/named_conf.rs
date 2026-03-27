@@ -511,3 +511,6 @@ pub enum TransferFormat {
     OneAnswer,
     ManyAnswers,
 }
+
+#[cfg(test)]
+mod named_conf_tests;

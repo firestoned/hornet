@@ -592,3 +592,6 @@ fn notify_str(n: &NotifyOption) -> &'static str {
         NotifyOption::MasterOnly => "master-only",
     }
 }
+
+#[cfg(test)]
+mod named_conf_tests;

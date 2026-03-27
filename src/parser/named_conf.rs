@@ -974,6 +974,9 @@ fn take_to_semi(input: &mut &str) -> ModalResult<String> {
     Ok(out.trim().to_owned())
 }
 
+#[cfg(test)]
+mod named_conf_tests;
+
 /// Match a keyword (case-insensitive, whole-word).
 fn keyword<'i>(kw: &'static str) -> impl Parser<&'i str, &'i str, winnow::error::ContextError> {
     move |input: &mut &'i str| {
