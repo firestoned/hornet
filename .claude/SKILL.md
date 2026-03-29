@@ -135,7 +135,8 @@ What `make docs` does:
 
 To preview with live reload:
 ```bash
-make docs-serve
+make docs-serve          # --dirtyreload: only rebuilds changed pages
+make docs-serve-dev      # also disables git-revision-date plugin for instant rebuilds
 ```
 
 **Verification:** `make docs` exits 0 with no errors.

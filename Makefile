@@ -95,9 +95,15 @@ publish: ## Publish the hornet crate to crates.io
 docs: ## Build MkDocs documentation site
 	cd docs && poetry run mkdocs build
 
+DOCS_PORT ?= 8000
+
 .PHONY: docs-serve
-docs-serve: ## Serve MkDocs documentation with live reload
-	cd docs && poetry run mkdocs serve
+docs-serve: ## Serve MkDocs documentation with live reload (dirtyreload: only rebuilds changed pages)
+	cd docs && poetry run mkdocs serve --dirtyreload --dev-addr 127.0.0.1:$(DOCS_PORT)
+
+.PHONY: docs-serve-dev
+docs-serve-dev: ## Serve docs in fast dev mode — disables git-revision-date plugin for instant rebuilds
+	cd docs && ENABLED_GIT_DATES=false poetry run mkdocs serve --dirtyreload --dev-addr 127.0.0.1:$(DOCS_PORT)
 
 .PHONY: docs-install
 docs-install: ## Install documentation dependencies via Poetry

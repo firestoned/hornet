@@ -79,6 +79,9 @@ theme:
     - content.tabs.link
     - content.tooltips
 
+  logo: images/hornet-nav.png
+  favicon: images/favicons/favicon.png
+
   icon:
     repo: fontawesome/brands/github
     edit: material/pencil
@@ -95,6 +98,7 @@ plugins:
       type: timeago
       fallback_to_build_date: true
       enable_git_follow: false
+      enabled: !ENV [ENABLED_GIT_DATES, true]
 
 # Extensions
 markdown_extensions:

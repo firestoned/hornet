@@ -4,6 +4,24 @@ Internal development log. For the public release changelog see `docs/src/referen
 
 Each entry documents what changed, who requested it, and why — required for auditability.
 
+## [2026-03-27 00:01] - Fix docs live reload; add docs-serve-dev target
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Makefile`: Add `--dirtyreload` to `docs-serve`; add new `docs-serve-dev` target that disables `git-revision-date-localized` via `ENABLED_GIT_DATES=false`
+- `docs/mkdocs.yml`: Wire `enabled: !ENV [ENABLED_GIT_DATES, true]` on `git-revision-date-localized` plugin so the env var can suppress it
+- `.claude/SKILL.md`: Update `build-docs` skill to document both serve targets
+
+### Why
+`navigation.instant` turns the site into a SPA, which breaks the live-reload WebSocket after the first navigation. `--dirtyreload` keeps the server responsive. The `git-revision-date-localized` plugin shells out to git for every page and slows rebuilds; `docs-serve-dev` skips it for local editing.
+
+### Impact
+- [ ] Breaking change
+- [ ] New feature
+- [ ] Bug fix
+- [x] Documentation only
+
 ## [2026-03-27 00:00] - Fix clippy warnings in test files; add BIND9 version support roadmap
 
 **Author:** Erick Bourgeois

@@ -1,6 +1,9 @@
-# Hornet
+# <img src="images/hornet.png" alt="Hornet" width="40" style="vertical-align: middle; margin-right: 2px;"/> Hornet
 
-## Project Status
+**Hornet** is a fast, comprehensive Rust library for **parsing**, **writing**, and **validating**
+[BIND9](https://www.isc.org/bind/) `named.conf` configuration files and DNS zone files.
+
+### Project Status
 
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Crates.io](https://img.shields.io/crates/v/hornet.svg)](https://crates.io/crates/hornet)
@@ -10,39 +13,23 @@
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/firestoned/hornet/latest)](https://github.com/firestoned/hornet/commits/main)
 [![Last Commit](https://img.shields.io/github/last-commit/firestoned/hornet)](https://github.com/firestoned/hornet/commits/main)
 
-## CI/CD Status
-
-[![Main CI/CD](https://github.com/firestoned/hornet/actions/workflows/main.yaml/badge.svg)](https://github.com/firestoned/hornet/actions/workflows/main.yaml)
-[![Pull Request Checks](https://github.com/firestoned/hornet/actions/workflows/pr.yml/badge.svg)](https://github.com/firestoned/hornet/actions/workflows/pr.yml)
-[![Release Workflow](https://github.com/firestoned/hornet/actions/workflows/release.yml/badge.svg)](https://github.com/firestoned/hornet/actions/workflows/release.yml)
-[![Documentation](https://github.com/firestoned/hornet/actions/workflows/docs.yaml/badge.svg)](https://github.com/firestoned/hornet/actions/workflows/docs.yaml)
-
-## Code Quality
-
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/firestoned/hornet/badge)](https://api.securityscorecards.dev/projects/github.com/firestoned/hornet)
-[![Rust](https://img.shields.io/badge/rust-1.74+-orange.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
-
-## Technology
+### Technology
 
 [![BIND9](https://img.shields.io/badge/BIND9-DNS%20Server-blue)](https://www.isc.org/bind/)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://www.linux.org/)
 [![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 
-## Security
+### Security
 
 [![SPDX](https://img.shields.io/badge/SPDX-License--Identifier-blue)](https://spdx.dev/)
 [![Commits Signed](https://img.shields.io/badge/commits-signed-brightgreen.svg)](https://github.com/firestoned/hornet/commits/main)
 
-## Community
+### Community
 
 [![Issues](https://img.shields.io/github/issues/firestoned/hornet)](https://github.com/firestoned/hornet/issues)
 [![Pull Requests](https://img.shields.io/github/issues-pr/firestoned/hornet)](https://github.com/firestoned/hornet/pulls)
 [![Stars](https://img.shields.io/github/stars/firestoned/hornet?style=social)](https://github.com/firestoned/hornet/stargazers)
-
-**Hornet** is a fast, comprehensive Rust library for **parsing**, **writing**, and **validating**
-[BIND9](https://www.isc.org/bind/) `named.conf` configuration files and DNS zone files.
 
 ---
 
