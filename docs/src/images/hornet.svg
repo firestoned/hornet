@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 640" width="680" height="640">
+<defs>
+  <radialGradient id="bodyG" cx="38%" cy="30%" r="60%">
+    <stop offset="0%"   stop-color="#FFE27A"/>
+    <stop offset="35%"  stop-color="#F5A623"/>
+    <stop offset="72%"  stop-color="#D4820A"/>
+    <stop offset="100%" stop-color="#A85C00"/>
+  </radialGradient>
+  <radialGradient id="headG" cx="36%" cy="26%" r="62%">
+    <stop offset="0%"   stop-color="#FFEC90"/>
+    <stop offset="28%"  stop-color="#F5A623"/>
+    <stop offset="72%"  stop-color="#D4820A"/>
+    <stop offset="100%" stop-color="#A05400"/>
+  </radialGradient>
+  <linearGradient id="wG1" x1="0%" y1="100%" x2="100%" y2="0%">
+    <stop offset="0%"   stop-color="#D4A020" stop-opacity=".38"/>
+    <stop offset="100%" stop-color="#FFFBE0" stop-opacity=".95"/>
+  </linearGradient>
+  <linearGradient id="wG2" x1="0%" y1="100%" x2="100%" y2="0%">
+    <stop offset="0%"   stop-color="#C08010" stop-opacity=".35"/>
+    <stop offset="100%" stop-color="#FFE8A0" stop-opacity=".88"/>
+  </linearGradient>
+  <radialGradient id="blush" cx="50%" cy="50%" r="50%">
+    <stop offset="0%"   stop-color="#FF8C50" stop-opacity=".48"/>
+    <stop offset="100%" stop-color="#FF8C50" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="visorG" cx="40%" cy="30%" r="65%">
+    <stop offset="0%"   stop-color="#2a0a0a"/>
+    <stop offset="100%" stop-color="#0a0202"/>
+  </radialGradient>
+  <radialGradient id="eyeGlow" cx="50%" cy="40%" r="55%">
+    <stop offset="0%"   stop-color="#FF5050"/>
+    <stop offset="60%"  stop-color="#E83030"/>
+    <stop offset="100%" stop-color="#880000"/>
+  </radialGradient>
+  <clipPath id="bc">
+    <ellipse cx="348" cy="415" rx="118" ry="130"/>
+  </clipPath>
+</defs>
+
+<!-- UPPER WING
+     Center at (210, 330) — sits at the body's upper-left shoulder.
+     rotate(-12) = nearly horizontal, sweeping gently up-left.
+     The right end of the ellipse (root) stays at body level ~y=320,
+     the left tip sweeps out to the upper-left but stays well below the head.
+-->
+<ellipse cx="210" cy="330" rx="130" ry="50"
+  fill="url(#wG1)" stroke="#1a0800" stroke-width="3.5"
+  transform="rotate(-12,210,330)"/>
+<!-- Wing veins from right (root) toward left tip -->
+<path d="M295,322 Q248,318 192,306" stroke="#B08010" stroke-width="1.2" fill="none" opacity=".48"/>
+<path d="M293,335 Q250,334 200,326" stroke="#B08010" stroke-width=".9" fill="none" opacity=".36"/>
+<path d="M290,347 Q252,348 208,344" stroke="#B08010" stroke-width=".8" fill="none" opacity=".28"/>
+
+<!-- LOWER WING — smaller, below and slightly left -->
+<ellipse cx="210" cy="392" rx="78" ry="30"
+  fill="url(#wG2)" stroke="#1a0800" stroke-width="3"
+  transform="rotate(-8,210,392)"/>
+
+<!-- BODY — covers wing roots -->
+<ellipse cx="348" cy="415" rx="118" ry="130" fill="url(#bodyG)" stroke="#1a0800" stroke-width="5"/>
+<!-- Armor stripes -->
+<rect x="230" y="378" width="236" height="26" clip-path="url(#bc)" fill="#1a0800" opacity=".86"/>
+<rect x="230" y="420" width="236" height="26" clip-path="url(#bc)" fill="#1a0800" opacity=".86"/>
+<rect x="230" y="462" width="236" height="22" clip-path="url(#bc)" fill="#1a0800" opacity=".83"/>
+<!-- Danger chevrons -->
+<path d="M268,400 L288,390 L308,400" stroke="#E83030" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+<path d="M268,442 L288,432 L308,442" stroke="#E83030" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+<!-- Body highlight -->
+<ellipse cx="304" cy="346" rx="44" ry="26" fill="white" opacity=".16" transform="rotate(-22,304,346)"/>
+
+<!-- Left arm — raised fist -->
+<path d="M244,372 Q198,340 172,308" stroke="#1a0800" stroke-width="15" fill="none" stroke-linecap="round"/>
+<path d="M244,372 Q198,340 172,308" stroke="#D4820A" stroke-width="10" fill="none" stroke-linecap="round"/>
+<ellipse cx="163" cy="298" rx="22" ry="20" fill="#D4820A" stroke="#1a0800" stroke-width="4.5"/>
+<ellipse cx="155" cy="290" rx="10" ry="6" fill="#F5A623" opacity=".38"/>
+<line x1="150" y1="294" x2="176" y2="288" stroke="#1a0800" stroke-width="2" opacity=".5"/>
+<line x1="149" y1="303" x2="175" y2="297" stroke="#1a0800" stroke-width="1.5" opacity=".35"/>
+
+<!-- Right arm — punching forward -->
+<path d="M452,372 Q492,338 510,300" stroke="#1a0800" stroke-width="15" fill="none" stroke-linecap="round"/>
+<path d="M452,372 Q492,338 510,300" stroke="#D4820A" stroke-width="10" fill="none" stroke-linecap="round"/>
+<ellipse cx="518" cy="290" rx="23" ry="21" fill="#D4820A" stroke="#1a0800" stroke-width="4.5"/>
+<ellipse cx="510" cy="281" rx="10" ry="6" fill="#F5A623" opacity=".38"/>
+<line x1="504" y1="287" x2="530" y2="280" stroke="#1a0800" stroke-width="2" opacity=".5"/>
+<line x1="503" y1="297" x2="529" y2="290" stroke="#1a0800" stroke-width="1.5" opacity=".35"/>
+
+<!-- Legs -->
+<path d="M312,536 Q304,552 300,566" stroke="#1a0800" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M312,536 Q304,552 300,566" stroke="#D4820A" stroke-width="8" fill="none" stroke-linecap="round"/>
+<path d="M348,540 Q347,556 346,570" stroke="#1a0800" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M348,540 Q347,556 346,570" stroke="#D4820A" stroke-width="8" fill="none" stroke-linecap="round"/>
+<path d="M384,535 Q392,551 396,565" stroke="#1a0800" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M384,535 Q392,551 396,565" stroke="#D4820A" stroke-width="8" fill="none" stroke-linecap="round"/>
+
+<!-- Stinger — long, barbed -->
+<path d="M348,534 Q340,554 342,572 Q344,584 348,594 Q352,584 354,572 Q356,554 348,534Z" fill="#1a0800"/>
+<polygon points="342,562 330,558 340,570" fill="#1a0800"/>
+<polygon points="354,562 366,558 356,570" fill="#1a0800"/>
+<polygon points="344,576 333,573 342,582" fill="#1a0800"/>
+<polygon points="352,576 363,573 354,582" fill="#1a0800"/>
+
+<!-- HEAD -->
+<circle cx="365" cy="192" r="108" fill="url(#headG)" stroke="#1a0800" stroke-width="5"/>
+<ellipse cx="320" cy="148" rx="52" ry="30" fill="white" opacity=".21" transform="rotate(-22,320,148)"/>
+
+<!-- Cheeks -->
+<ellipse cx="316" cy="228" rx="26" ry="18" fill="url(#blush)" opacity=".7"/>
+<ellipse cx="434" cy="218" rx="30" ry="20" fill="url(#blush)" opacity=".7"/>
+
+<!-- BATTLE VISOR -->
+<rect x="295" y="158" width="178" height="82" rx="14" fill="url(#visorG)" stroke="#1a0800" stroke-width="4"/>
+<path d="M295,170 Q384,158 473,170 L473,164 Q384,152 295,164Z" fill="#CC0000" opacity=".7"/>
+<ellipse cx="370" cy="175" rx="60" ry="14" fill="white" opacity=".09" transform="rotate(-5,370,175)"/>
+<line x1="320" y1="162" x2="310" y2="232" stroke="white" stroke-width="1.2" opacity=".1"/>
+<rect x="313" y="178" width="66" height="22" rx="6" fill="url(#eyeGlow)" stroke="#FF4040" stroke-width="1"/>
+<rect x="391" y="172" width="68" height="22" rx="6" fill="url(#eyeGlow)" stroke="#FF4040" stroke-width="1"/>
+<rect x="316" y="182" width="58" height="10" rx="3" fill="#FF8888" opacity=".55"/>
+<rect x="394" y="176" width="60" height="10" rx="3" fill="#FF8888" opacity=".55"/>
+<path d="M297,238 Q384,246 471,238" stroke="#880000" stroke-width="2.5" fill="none" opacity=".7"/>
+
+<!-- Nose + Snarl -->
+<ellipse cx="412" cy="256" rx="10" ry="8" fill="#A05400" opacity=".65"/>
+<path d="M334,268 L344,260 L356,270 L368,260 L380,270 L392,260 L404,270 L416,262 L424,268"
+  stroke="#1a0800" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+<!-- Fierce eyebrows -->
+<path d="M306,156 Q338,138 372,152" stroke="#1a0800" stroke-width="8" fill="none" stroke-linecap="round"/>
+<path d="M386,148 Q416,134 452,148" stroke="#1a0800" stroke-width="8" fill="none" stroke-linecap="round"/>
+<path d="M366,152 Q376,148 386,148" stroke="#1a0800" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+<!-- Antennae — red arrow tips -->
+<path d="M340,86 Q308,56 278,34" stroke="#1a0800" stroke-width="6" fill="none" stroke-linecap="round"/>
+<polygon points="278,22 268,38 288,38" fill="#E83030" stroke="#1a0800" stroke-width="2.5"/>
+<path d="M390,82 Q424,52 456,32" stroke="#1a0800" stroke-width="6" fill="none" stroke-linecap="round"/>
+<polygon points="456,20 446,36 466,36" fill="#E83030" stroke="#1a0800" stroke-width="2.5"/>
+</svg>
