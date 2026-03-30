@@ -92,12 +92,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Update version in Cargo.toml
-        run: |
-          sed -i 's/^version[[:space:]]*=[[:space:]]*"[^"]*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
-          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
-          grep 'version' Cargo.toml | head -5
-
       - name: Setup Rust build environment
         uses: firestoned/github-actions/rust/setup-rust-build@v1.3.4
         with:
@@ -303,12 +297,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Update version in Cargo.toml
-        run: |
-          sed -i 's/^version[[:space:]]*=[[:space:]]*"[^"]*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
-          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
-          grep '^version' Cargo.toml
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

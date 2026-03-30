@@ -17,7 +17,7 @@ on:
       run_stress:
         description: 'Also run stress benchmarks (10k / 100k zones)'
         required: false
-        default: 'false'
+        default: 'true'
         type: boolean
 
 permissions:
