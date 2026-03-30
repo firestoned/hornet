@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use miette::IntoDiagnostic;
 
-use hornet::{
+use hornet_bind9::{
     error::Severity, parse_named_conf_file, parse_zone_file_from_path, validate_named_conf,
     validate_zone_file, write_named_conf, write_zone_file, writer::WriteOptions,
 };

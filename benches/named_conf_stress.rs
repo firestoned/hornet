@@ -13,7 +13,7 @@
 //! | xxxlarge_50k_zones | 50 000 | ~6.5 MB     |
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use hornet::parse_named_conf;
+use hornet_bind9::parse_named_conf;
 
 /// Build a named.conf string containing `zone_count` zone statements.
 fn gen_zones(zone_count: usize) -> String {

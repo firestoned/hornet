@@ -8,7 +8,7 @@ Hornet can serialise any parsed AST back to valid BIND9 text. The output is cont
 ## `WriteOptions`
 
 ```rust
-use hornet::writer::WriteOptions;
+use hornet_bind9::writer::WriteOptions;
 
 let opts = WriteOptions {
     indent: 4,                     // spaces per indent level
@@ -33,8 +33,8 @@ let opts = WriteOptions::default();
 ## Writing `named.conf`
 
 ```rust
-use hornet::{parse_named_conf, write_named_conf};
-use hornet::writer::WriteOptions;
+use hornet_bind9::{parse_named_conf, write_named_conf};
+use hornet_bind9::writer::WriteOptions;
 
 let conf = parse_named_conf(input)?;
 
@@ -69,8 +69,8 @@ let legacy = write_named_conf(&conf, &opts);
 ## Writing zone files
 
 ```rust
-use hornet::{parse_zone_file, write_zone_file};
-use hornet::writer::WriteOptions;
+use hornet_bind9::{parse_zone_file, write_zone_file};
+use hornet_bind9::writer::WriteOptions;
 
 let zone = parse_zone_file(zone_text)?;
 let output = write_zone_file(&zone, &WriteOptions::default());
@@ -102,8 +102,8 @@ To reformat a file on disk:
 
 ```rust
 use std::path::Path;
-use hornet::{parse_named_conf_file, write_named_conf};
-use hornet::writer::WriteOptions;
+use hornet_bind9::{parse_named_conf_file, write_named_conf};
+use hornet_bind9::writer::WriteOptions;
 
 fn fmt_file(path: &Path) -> hornet::Result<()> {
     let conf = parse_named_conf_file(path)?;

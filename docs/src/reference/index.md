@@ -36,4 +36,4 @@ pub use ast::{named_conf, zone_file};
 pub use error::{Error, Result, Severity, ValidationError};
 ```
 
-Full rustdoc is available at [docs.rs/hornet](https://docs.rs/hornet).
+Full rustdoc is available at [docs.rs/hornet-bind9](https://docs.rs/hornet-bind9).

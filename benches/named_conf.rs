@@ -16,8 +16,8 @@
 //! | xxxlarge_50k_zones  | 50 000 zones (generated) — stress      | 6 500 000|
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use hornet::writer::WriteOptions;
-use hornet::{parse_named_conf, validate_named_conf, write_named_conf};
+use hornet_bind9::writer::WriteOptions;
+use hornet_bind9::{parse_named_conf, validate_named_conf, write_named_conf};
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 

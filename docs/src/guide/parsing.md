@@ -12,7 +12,7 @@ both string input and file input.
 Use `parse_named_conf()` when you already have the config text in memory:
 
 ```rust
-use hornet::parse_named_conf;
+use hornet_bind9::parse_named_conf;
 
 let input = r#"
 options {
@@ -36,7 +36,7 @@ Use `parse_named_conf_file()` to read and parse in one step:
 
 ```rust
 use std::path::Path;
-use hornet::parse_named_conf_file;
+use hornet_bind9::parse_named_conf_file;
 
 let conf = parse_named_conf_file(Path::new("/etc/bind/named.conf"))?;
 println!("Parsed {} statement(s)", conf.statements.len());
@@ -49,7 +49,7 @@ println!("Parsed {} statement(s)", conf.statements.len());
 ### From a string
 
 ```rust
-use hornet::parse_zone_file;
+use hornet_bind9::parse_zone_file;
 
 let zone_text = r#"
 $ORIGIN example.com.
@@ -66,7 +66,7 @@ let zone = parse_zone_file(zone_text)?;
 
 ```rust
 use std::path::Path;
-use hornet::parse_zone_file_from_path;
+use hornet_bind9::parse_zone_file_from_path;
 
 let zone = parse_zone_file_from_path(Path::new("/etc/bind/zones/example.com.db"))?;
 ```
@@ -78,8 +78,8 @@ let zone = parse_zone_file_from_path(Path::new("/etc/bind/zones/example.com.db")
 ### Iterating over `named.conf` statements
 
 ```rust
-use hornet::ast::named_conf::Statement;
-use hornet::parse_named_conf;
+use hornet_bind9::ast::named_conf::Statement;
+use hornet_bind9::parse_named_conf;
 
 let conf = parse_named_conf(input)?;
 
@@ -102,8 +102,8 @@ for stmt in &conf.statements {
 ### Iterating over zone file records
 
 ```rust
-use hornet::ast::zone_file::{Entry, RData};
-use hornet::parse_zone_file;
+use hornet_bind9::ast::zone_file::{Entry, RData};
+use hornet_bind9::parse_zone_file;
 
 let zone = parse_zone_file(zone_text)?;
 
@@ -154,7 +154,7 @@ Error:   × expected ';' after statement
 ### Handling errors explicitly
 
 ```rust
-use hornet::Error;
+use hornet_bind9::Error;
 
 match hornet::parse_named_conf(input) {
     Ok(conf)  => { /* use conf */ }

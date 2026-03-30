@@ -4,6 +4,37 @@ Internal development log. For the public release changelog see `docs/src/referen
 
 Each entry documents what changed, who requested it, and why — required for auditability.
 
+## [2026-03-29 00:00] - Rename crate from `hornet` to `hornet-bind9`
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.toml`: package `name` → `"hornet-bind9"` (lib and bin names unchanged — CLI binary stays `hornet`)
+- `src/lib.rs`: crate doc comment updated
+- `src/error.rs`: diagnostic codes `hornet::` → `hornet_bind9::`; module doc updated
+- `src/main.rs`: `use hornet::` → `use hornet_bind9::`
+- `tests/named_conf.rs`, `tests/zone_file.rs`: `use hornet::` → `use hornet_bind9::`
+- `benches/named_conf.rs`, `benches/zone_file.rs`, `benches/named_conf_stress.rs`: same
+- `README.md`: crates.io/docs.rs badge URLs, `hornet = "0.1"` dep snippet, `cargo install hornet`, all `use hornet::` examples
+- `docs/src/index.md`: same badge URLs and code examples
+- `docs/src/installation/quickstart.md`, `installation.md`, `cli/index.md`: `cargo install`/`cargo add` snippets
+- `docs/src/guide/parsing.md`, `writing.md`, `validating.md`, `serde.md`: all `use hornet::` examples
+- `docs/src/reference/write-options.md`, `reference/index.md`: `use hornet::` examples; docs.rs link
+- `Makefile`: `docs-serve` / `docs-serve-dev` now accept `DOCS_PORT` env var (default 8000)
+- `docs/src/images/favicons/`: added full favicon set (16, 32, 180, 192, 512 px) generated from `hornet.png`
+- `docs/mkdocs.yml`: added `logo` and `favicon` entries
+
+### Why
+The crate name `hornet` was already taken on crates.io. `hornet-bind9` is unambiguous and follows the `<name>-<domain>` convention. The binary name is kept as `hornet` so the CLI UX is unchanged.
+
+### Impact
+- [x] Breaking change (crate name / Rust path changes for downstream users)
+- [ ] New feature
+- [ ] Bug fix
+- [ ] Documentation only
+
+---
+
 ## [2026-03-27 00:01] - Fix docs live reload; add docs-serve-dev target
 
 **Author:** Erick Bourgeois
