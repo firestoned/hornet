@@ -6,7 +6,7 @@
 
 ```toml
 [dependencies]
-hornet = "0.1"
+hornet-bind9 = "0.1"
 ```
 
 ### With serde support
@@ -31,7 +31,7 @@ cargo build --release
 ### From crates.io
 
 ```sh
-cargo install hornet
+cargo install hornet-bind9
 ```
 
 This compiles the `hornet` binary and places it in `~/.cargo/bin/`. Ensure that directory is in

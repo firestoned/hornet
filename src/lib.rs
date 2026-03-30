@@ -1,4 +1,4 @@
-//! # hornet
+//! # hornet-bind9
 //!
 //! Parse, write, and validate BIND9 `named.conf` configuration files and DNS
 //! zone files.
@@ -6,7 +6,7 @@
 //! ## Quick start
 //!
 //! ```rust
-//! use hornet::parse_named_conf;
+//! use hornet_bind9::parse_named_conf;
 //!
 //! let input = r#"
 //! options {

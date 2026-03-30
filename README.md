@@ -3,9 +3,9 @@
 ### Project Status
 
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Crates.io](https://img.shields.io/crates/v/hornet.svg)](https://crates.io/crates/hornet)
-[![Crates.io Downloads](https://img.shields.io/crates/d/hornet.svg)](https://crates.io/crates/hornet)
-[![docs.rs](https://docs.rs/hornet/badge.svg)](https://docs.rs/hornet)
+[![Crates.io](https://img.shields.io/crates/v/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
+[![Crates.io Downloads](https://img.shields.io/crates/d/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
+[![docs.rs](https://docs.rs/hornet-bind9/badge.svg)](https://docs.rs/hornet-bind9)
 [![GitHub Release](https://img.shields.io/github/v/release/firestoned/hornet)](https://github.com/firestoned/hornet/releases/latest)
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/firestoned/hornet/latest)](https://github.com/firestoned/hornet/commits/main)
 [![Last Commit](https://img.shields.io/github/last-commit/firestoned/hornet)](https://github.com/firestoned/hornet/commits/main)
@@ -99,13 +99,13 @@ full table including write and validation timings.
 
 ```toml
 [dependencies]
-hornet = "0.1"
+hornet-bind9 = "0.1"
 ```
 
 ### CLI
 
 ```sh
-cargo install hornet
+cargo install hornet-bind9
 ```
 
 ---
@@ -115,7 +115,7 @@ cargo install hornet
 ### Parse a `named.conf`
 
 ```rust
-use hornet::parse_named_conf;
+use hornet_bind9::parse_named_conf;
 
 let input = r#"
 options {
@@ -137,7 +137,7 @@ println!("{} statement(s)", conf.statements.len());
 ### Parse a zone file
 
 ```rust
-use hornet::parse_zone_file;
+use hornet_bind9::parse_zone_file;
 
 let zone_text = r#"
 $ORIGIN example.com.
@@ -156,7 +156,7 @@ for record in zone.records() {
 ### Validate
 
 ```rust
-use hornet::{parse_named_conf, validate_named_conf, Severity};
+use hornet_bind9::{parse_named_conf, validate_named_conf, Severity};
 
 let conf = parse_named_conf(input)?;
 let diags = validate_named_conf(&conf);
@@ -173,8 +173,8 @@ for d in &diags {
 ### Write / format
 
 ```rust
-use hornet::{parse_named_conf, write_named_conf};
-use hornet::writer::WriteOptions;
+use hornet_bind9::{parse_named_conf, write_named_conf};
+use hornet_bind9::writer::WriteOptions;
 
 let conf = parse_named_conf(input)?;
 let opts = WriteOptions {

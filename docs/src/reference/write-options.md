@@ -3,7 +3,7 @@
 `WriteOptions` controls how Hornet serialises an AST back to BIND9 text.
 
 ```rust
-use hornet::writer::WriteOptions;
+use hornet_bind9::writer::WriteOptions;
 
 pub struct WriteOptions {
     pub indent: usize,
@@ -141,8 +141,8 @@ impl Default for WriteOptions {
 ## Complete example
 
 ```rust
-use hornet::{parse_named_conf, write_named_conf};
-use hornet::writer::WriteOptions;
+use hornet_bind9::{parse_named_conf, write_named_conf};
+use hornet_bind9::writer::WriteOptions;
 
 let conf = parse_named_conf(input)?;
 

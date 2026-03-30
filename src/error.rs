@@ -1,4 +1,4 @@
-//! Error types for `hornet`.
+//! Error types for `hornet-bind9`.
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, Error, Diagnostic)]
 pub enum Error {
     #[error("Parse error in {file}: {message}")]
-    #[diagnostic(code(hornet::parse))]
+    #[diagnostic(code(hornet_bind9::parse))]
     Parse {
         file: String,
         message: String,
@@ -18,15 +18,15 @@ pub enum Error {
     },
 
     #[error("Validation error: {0}")]
-    #[diagnostic(code(hornet::validate))]
+    #[diagnostic(code(hornet_bind9::validate))]
     Validation(#[from] ValidationError),
 
     #[error("I/O error: {0}")]
-    #[diagnostic(code(hornet::io))]
+    #[diagnostic(code(hornet_bind9::io))]
     Io(#[from] std::io::Error),
 
     #[error("Write error: {0}")]
-    #[diagnostic(code(hornet::write))]
+    #[diagnostic(code(hornet_bind9::write))]
     Write(String),
 }
 

@@ -1,5 +1,5 @@
 [package]
-name         = "hornet"
+name         = "hornet-bind9"
 version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.74"
@@ -12,7 +12,7 @@ categories   = ["parser-implementations", "command-line-utilities"]
 authors      = ["Erick Bourgeois <erick@firestoned.io>"]
 
 [lib]
-name = "hornet"
+name = "hornet_bind9"
 path = "src/lib.rs"
 
 [[bin]]

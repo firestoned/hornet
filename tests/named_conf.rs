@@ -1,8 +1,8 @@
 //! Integration tests for the named.conf parser + writer round-trip.
 
-use hornet::ast::named_conf::*;
-use hornet::writer::WriteOptions;
-use hornet::{parse_named_conf, validate_named_conf, write_named_conf};
+use hornet_bind9::ast::named_conf::*;
+use hornet_bind9::writer::WriteOptions;
+use hornet_bind9::{parse_named_conf, validate_named_conf, write_named_conf};
 
 const SIMPLE_CONF: &str = r#"
 options {
@@ -103,7 +103,7 @@ fn validate_no_errors_on_valid_conf() {
     let diags = validate_named_conf(&conf);
     let errors: Vec<_> = diags
         .iter()
-        .filter(|d| d.severity == hornet::Severity::Error)
+        .filter(|d| d.severity == hornet_bind9::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "Unexpected errors: {errors:?}");
 }
@@ -224,7 +224,7 @@ zone "example.com" { type primary; file "b.db"; };
     let diags = validate_named_conf(&conf);
     let errors: Vec<_> = diags
         .iter()
-        .filter(|d| d.severity == hornet::Severity::Error)
+        .filter(|d| d.severity == hornet_bind9::Severity::Error)
         .collect();
     assert!(!errors.is_empty(), "Expected duplicate zone error");
 }
@@ -238,7 +238,7 @@ zone "example.com" { type secondary; file "example.com.db"; };
     let diags = validate_named_conf(&conf);
     let warns: Vec<_> = diags
         .iter()
-        .filter(|d| d.severity == hornet::Severity::Warning)
+        .filter(|d| d.severity == hornet_bind9::Severity::Warning)
         .collect();
     assert!(
         !warns.is_empty(),

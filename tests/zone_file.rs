@@ -1,8 +1,8 @@
 //! Integration tests for zone file parsing, writing, and validation.
 
-use hornet::ast::zone_file::*;
-use hornet::writer::WriteOptions;
-use hornet::{parse_zone_file, validate_zone_file, write_zone_file};
+use hornet_bind9::ast::zone_file::*;
+use hornet_bind9::writer::WriteOptions;
+use hornet_bind9::{parse_zone_file, validate_zone_file, write_zone_file};
 
 const SIMPLE_ZONE: &str = r#"
 $ORIGIN example.com.
@@ -135,7 +135,7 @@ fn validate_ok_zone() {
     let diags = validate_zone_file(&zone);
     let errors: Vec<_> = diags
         .iter()
-        .filter(|d| d.severity == hornet::Severity::Error)
+        .filter(|d| d.severity == hornet_bind9::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "Unexpected errors: {errors:?}");
 }
@@ -147,7 +147,7 @@ fn validate_missing_soa() {
     let diags = validate_zone_file(&zone);
     let has_soa_error = diags
         .iter()
-        .any(|d| d.severity == hornet::Severity::Error && d.message.contains("SOA"));
+        .any(|d| d.severity == hornet_bind9::Severity::Error && d.message.contains("SOA"));
     assert!(has_soa_error, "Expected missing-SOA error");
 }
 
@@ -159,7 +159,7 @@ fn validate_missing_ns() {
     let diags = validate_zone_file(&zone);
     let has_ns_error = diags
         .iter()
-        .any(|d| d.severity == hornet::Severity::Error && d.message.contains("NS"));
+        .any(|d| d.severity == hornet_bind9::Severity::Error && d.message.contains("NS"));
     assert!(has_ns_error, "Expected missing-NS error");
 }
 

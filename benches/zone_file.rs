@@ -14,8 +14,8 @@
 //! | xlarge_10k_records | 10 000 A records (generated)           | 600 000 |
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use hornet::writer::WriteOptions;
-use hornet::{parse_zone_file, validate_zone_file, write_zone_file};
+use hornet_bind9::writer::WriteOptions;
+use hornet_bind9::{parse_zone_file, validate_zone_file, write_zone_file};
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 

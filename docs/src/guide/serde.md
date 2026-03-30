@@ -18,7 +18,7 @@ serde_json = "1"   # or any serde format you prefer
 ## Serialising to JSON
 
 ```rust
-use hornet::{parse_named_conf, ast::named_conf::NamedConf};
+use hornet_bind9::{parse_named_conf, ast::named_conf::NamedConf};
 
 let conf: NamedConf = hornet::parse_named_conf(input)?;
 
@@ -55,7 +55,7 @@ Example output (abbreviated):
 ## Serialising zone files
 
 ```rust
-use hornet::{parse_zone_file, ast::zone_file::ZoneFile};
+use hornet_bind9::{parse_zone_file, ast::zone_file::ZoneFile};
 
 let zone: ZoneFile = hornet::parse_zone_file(zone_text)?;
 let json = serde_json::to_string_pretty(&zone)?;

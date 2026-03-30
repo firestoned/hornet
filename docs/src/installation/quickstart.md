@@ -10,7 +10,7 @@ Add hornet to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hornet = "0.1"
+hornet-bind9 = "0.1"
 ```
 
 To enable `serde` support on all AST types:
@@ -25,7 +25,7 @@ hornet = { version = "0.1", features = ["serde"] }
 ## 2. Parse a `named.conf`
 
 ```rust
-use hornet::parse_named_conf;
+use hornet_bind9::parse_named_conf;
 
 fn main() -> hornet::Result<()> {
     let input = r#"
@@ -52,7 +52,7 @@ zone "example.com" {
 ## 3. Parse a zone file
 
 ```rust
-use hornet::parse_zone_file;
+use hornet_bind9::parse_zone_file;
 
 fn main() -> hornet::Result<()> {
     let zone_text = r#"
@@ -77,7 +77,7 @@ $TTL 1h
 ## 4. Install the CLI
 
 ```sh
-cargo install hornet
+cargo install hornet-bind9
 ```
 
 Verify the installation:

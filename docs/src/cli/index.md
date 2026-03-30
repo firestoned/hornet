@@ -7,7 +7,7 @@ The `hornet` CLI provides six subcommands for working with BIND9 files from the 
 ## Installation
 
 ```sh
-cargo install hornet-cli
+cargo install hornet-bind9
 ```
 
 ---

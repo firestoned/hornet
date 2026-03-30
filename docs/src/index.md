@@ -6,9 +6,9 @@
 ### Project Status
 
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Crates.io](https://img.shields.io/crates/v/hornet.svg)](https://crates.io/crates/hornet)
-[![Crates.io Downloads](https://img.shields.io/crates/d/hornet.svg)](https://crates.io/crates/hornet)
-[![docs.rs](https://docs.rs/hornet/badge.svg)](https://docs.rs/hornet)
+[![Crates.io](https://img.shields.io/crates/v/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
+[![Crates.io Downloads](https://img.shields.io/crates/d/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
+[![docs.rs](https://docs.rs/hornet-bind9/badge.svg)](https://docs.rs/hornet-bind9)
 [![GitHub Release](https://img.shields.io/github/v/release/firestoned/hornet)](https://github.com/firestoned/hornet/releases/latest)
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/firestoned/hornet/latest)](https://github.com/firestoned/hornet/commits/main)
 [![Last Commit](https://img.shields.io/github/last-commit/firestoned/hornet)](https://github.com/firestoned/hornet/commits/main)
@@ -60,7 +60,7 @@ a live DNS server.
 ### Parse a `named.conf`
 
 ```rust
-use hornet::parse_named_conf;
+use hornet_bind9::parse_named_conf;
 
 let input = r#"
 options {
@@ -82,7 +82,7 @@ println!("{} statement(s)", conf.statements.len()); // 2
 ### Validate a config
 
 ```rust
-use hornet::{parse_named_conf, validate_named_conf, Severity};
+use hornet_bind9::{parse_named_conf, validate_named_conf, Severity};
 
 let conf = parse_named_conf(input)?;
 for diag in validate_named_conf(&conf) {

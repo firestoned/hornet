@@ -10,7 +10,7 @@ Hornet's validator performs semantic checks on a parsed AST and returns a list o
 ### Validate a `named.conf`
 
 ```rust
-use hornet::{parse_named_conf, validate_named_conf, Severity};
+use hornet_bind9::{parse_named_conf, validate_named_conf, Severity};
 
 let conf = parse_named_conf(input)?;
 let diags = validate_named_conf(&conf);
@@ -32,7 +32,7 @@ for d in &diags {
 ### Validate a zone file
 
 ```rust
-use hornet::{parse_zone_file, validate_zone_file};
+use hornet_bind9::{parse_zone_file, validate_zone_file};
 
 let zone = parse_zone_file(zone_text)?;
 let diags = validate_zone_file(&zone);
@@ -59,7 +59,7 @@ for d in &diags {
 ## Filtering by severity
 
 ```rust
-use hornet::Severity;
+use hornet_bind9::Severity;
 
 let errors: Vec<_> = diags.iter()
     .filter(|d| d.severity == Severity::Error)
@@ -77,7 +77,7 @@ let warnings_and_above: Vec<_> = diags.iter()
 A common pattern for CI pipelines is to fail on errors but pass on warnings:
 
 ```rust
-use hornet::Severity;
+use hornet_bind9::Severity;
 
 let has_error   = diags.iter().any(|d| d.severity == Severity::Error);
 let has_warning = diags.iter().any(|d| d.severity == Severity::Warning);
