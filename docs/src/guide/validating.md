@@ -139,6 +139,22 @@ The validator recognises the following built-in ACL names and never reports them
 | TXT record total exceeds 65535 bytes | Error |
 | MX exchange is `.` (null MX) | Warning |
 | Non-standard CAA tag | Warning |
+| Record of a modelled type whose data did not parse (kept verbatim) | Warning |
+
+### Malformed records kept verbatim
+
+The zone-file parser never drops a record. When a record's type is one hornet models (see
+`hornet_bind9::ast::zone_file::MODELLED_RTYPES`) but its data does not match that type's
+syntax, or has trailing text after a valid value, the record is kept as
+`RData::Unknown { rtype, data }` with its real type name. The validator reports each one:
+
+```text
+warning: MX record data `not-a-number mail.example.com.` is not valid MX syntax; kept verbatim
+```
+
+The record still round-trips through the writer unchanged, but BIND9 will most likely
+reject it. Records of types hornet does not model at all (for example `TYPE65534` or
+`OPENPGPKEY`) are also stored as `RData::Unknown`, but produce no warning.
 
 ---
 

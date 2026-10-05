@@ -785,4 +785,305 @@ mod tests {
             "www       5m  IN      A         192.0.2.1\n"
         );
     }
+
+    // ── Escaping (RFC 1035 section 5.1) ─────────────────────────────────────────
+
+    use super::super::{escape_char_string, escape_name, escape_token};
+
+    /// The F2 payload: a TXT value that tried to close its string and start a
+    /// new record. It must come out as one escaped string on one line.
+    #[test]
+    fn test_txt_injection_payload_is_escaped_onto_one_line() {
+        let payload = "x\\\"\nevil 300 IN A 6.6.6.6\n;";
+        let out = rdata_text(RData::Txt(vec![payload.into()]));
+        assert_eq!(out, r#""x\\\"\010evil 300 IN A 6.6.6.6\010;""#);
+        assert!(!out.contains('\n'));
+    }
+
+    #[test]
+    fn test_escape_char_string_rules() {
+        assert_eq!(escape_char_string("plain text ~!"), "plain text ~!");
+        assert_eq!(escape_char_string("q\"b\\"), r#"q\"b\\"#);
+        assert_eq!(escape_char_string("a\nb\tc\u{7f}"), r"a\010b\009c\127");
+        assert_eq!(escape_char_string("café"), r"caf\195\169");
+    }
+
+    #[test]
+    fn test_escape_name_rules() {
+        let esc = |s: &str| escape_name(&Name::new(s));
+        assert_eq!(esc("@"), "@");
+        assert_eq!(esc("www.example.com."), "www.example.com.");
+        assert_eq!(esc("*.wild_card-1"), "*.wild_card-1");
+        assert_eq!(esc("0/26"), "0/26");
+        assert_eq!(esc("/lead"), r"\/lead");
+        assert_eq!(esc("$dollar"), r"\$dollar");
+        assert_eq!(esc("a@b"), r"a\@b");
+        assert_eq!(esc("a;b(c)\"d"), r#"a\;b\(c\)\"d"#);
+        assert_eq!(esc("sp ace\nnl"), r"sp\032ace\010nl");
+        assert_eq!(esc("café"), "café");
+        assert_eq!(esc("nb\u{a0}sp"), r"nb\194\160sp");
+    }
+
+    #[test]
+    fn test_escape_name_keeps_existing_escapes() {
+        let esc = |s: &str| escape_name(&Name::new(s));
+        assert_eq!(esc(r"esc\.dot"), r"esc\.dot");
+        assert_eq!(esc(r"sp\032ace"), r"sp\032ace");
+        assert_eq!(esc(r"\$x"), r"\$x");
+        assert_eq!(esc("end\\"), r"end\\");
+        assert_eq!(esc("a\\\nb"), r"a\\\010b");
+    }
+
+    #[test]
+    fn test_escape_token_rules() {
+        assert_eq!(escape_token("/base64+key=="), "/base64+key==");
+        assert_eq!(escape_token("host-$"), "host-$");
+        assert_eq!(escape_token("a b;c"), r"a\032b\;c");
+        assert_eq!(escape_token("x\"(y)"), r#"x\"\(y\)"#);
+        assert_eq!(escape_token("é€"), r"é\226\130\172");
+    }
+
+    fn written(entries: Vec<Entry>) -> String {
+        write_zone_file(&ZoneFile { entries }, &default_opts())
+    }
+
+    #[test]
+    fn test_owner_name_is_escaped_and_aligned() {
+        let out = written(vec![
+            make_record("a b", RData::A("192.0.2.1".parse().unwrap())),
+            make_record("c", RData::A("192.0.2.2".parse().unwrap())),
+        ]);
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[0].starts_with(r"a\032b  "), "{out}");
+        assert!(lines[1].starts_with("c       "), "{out}");
+    }
+
+    #[test]
+    fn test_name_rdata_fields_are_escaped() {
+        let bad = || Name::new("x y");
+        assert_eq!(rdata_text(RData::Ns(bad())), r"x\032y");
+        assert_eq!(
+            rdata_text(RData::Mx(MxData {
+                preference: 10,
+                exchange: bad()
+            })),
+            r"10 x\032y"
+        );
+        assert_eq!(
+            rdata_text(RData::Srv(SrvData {
+                priority: 1,
+                weight: 2,
+                port: 3,
+                target: bad()
+            })),
+            r"1 2 3 x\032y"
+        );
+        assert_eq!(
+            rdata_text(RData::Nsec(NsecData {
+                next_domain: bad(),
+                type_bitmap: vec![]
+            })),
+            r"x\032y"
+        );
+        let soa = rdata_text(RData::Soa(SoaData {
+            mname: bad(),
+            rname: Name::new("h;x"),
+            serial: 1,
+            refresh: 2,
+            retry: 3,
+            expire: 4,
+            minimum: 5,
+        }));
+        assert!(soa.starts_with(r"x\032y h\;x ("), "{soa}");
+    }
+
+    #[test]
+    fn test_string_rdata_fields_are_escaped() {
+        assert_eq!(
+            rdata_text(RData::Hinfo {
+                cpu: "a\"b".into(),
+                os: "c\nd".into()
+            }),
+            r#""a\"b" "c\010d""#
+        );
+        assert_eq!(
+            rdata_text(RData::Caa(CaaData {
+                flags: 0,
+                tag: "is sue".into(),
+                value: "v\"".into()
+            })),
+            r#"0 is\032sue "v\"""#
+        );
+        assert_eq!(
+            rdata_text(RData::Naptr(NaptrData {
+                order: 1,
+                preference: 2,
+                flags: "U\"".into(),
+                service: "s\\".into(),
+                regexp: "r\n".into(),
+                replacement: Name::new("r p"),
+            })),
+            r#"1 2 "U\"" "s\\" "r\010" r\032p"#
+        );
+    }
+
+    #[test]
+    fn test_token_rdata_fields_are_escaped() {
+        let bad = || "ab cd".to_string();
+        assert_eq!(
+            rdata_text(RData::Sshfp(SshfpData {
+                algorithm: 1,
+                fp_type: 2,
+                fingerprint: bad()
+            })),
+            r"1 2 ab\032cd"
+        );
+        assert_eq!(
+            rdata_text(RData::Tlsa(TlsaData {
+                usage: 3,
+                selector: 1,
+                matching_type: 1,
+                data: bad()
+            })),
+            r"3 1 1 ab\032cd"
+        );
+        assert_eq!(
+            rdata_text(RData::Ds(DsData {
+                key_tag: 1,
+                algorithm: 8,
+                digest_type: 2,
+                digest: bad()
+            })),
+            r"1 8 2 ab\032cd"
+        );
+        assert_eq!(
+            rdata_text(RData::Dnskey(DnskeyData {
+                flags: 257,
+                protocol: 3,
+                algorithm: 13,
+                public_key: bad()
+            })),
+            r"257 3 13 ab\032cd"
+        );
+        assert_eq!(
+            rdata_text(RData::Rrsig(RrsigData {
+                type_covered: "A\n".into(),
+                algorithm: 13,
+                labels: 2,
+                original_ttl: 300,
+                sig_expiration: "1 2".into(),
+                sig_inception: "3;".into(),
+                key_tag: 7,
+                signer_name: Name::new("s i."),
+                signature: bad(),
+            })),
+            r"A\010 13 2 300 1\0322 3\; 7 s\032i. ab\032cd"
+        );
+        assert_eq!(
+            rdata_text(RData::Nsec3(Nsec3Data {
+                hash_algorithm: 1,
+                flags: 0,
+                iterations: 0,
+                salt: bad(),
+                next_hashed: "h)".into(),
+                type_bitmap: vec!["A".into(), "B C".into()],
+            })),
+            r"1 0 0 ab\032cd h\) A B\032C"
+        );
+        assert_eq!(
+            rdata_text(RData::Nsec3param(Nsec3paramData {
+                hash_algorithm: 1,
+                flags: 0,
+                iterations: 0,
+                salt: bad(),
+            })),
+            r"1 0 0 ab\032cd"
+        );
+    }
+
+    #[test]
+    fn test_svcb_target_key_and_values_are_escaped() {
+        let param = |key: &str, value: Option<&str>| SvcParam {
+            key: key.into(),
+            value: value.map(str::to_owned),
+        };
+        let text = rdata_text(RData::Svcb(SvcbData {
+            priority: 1,
+            target: Name::new("t t."),
+            params: vec![
+                param("alpn", Some("h2,h3")),
+                param("key65000", Some("")),
+                param("key65001", Some("a b")),
+                param("key65002", Some("q\"")),
+                param("key65003", Some("b\\s")),
+                param("k y", None),
+            ],
+        }));
+        assert_eq!(
+            text,
+            r#"1 t\032t. alpn=h2,h3 key65000= key65001="a b" key65002="q\"" key65003="b\\s" k\032y"#
+        );
+    }
+
+    #[test]
+    fn test_include_path_and_origin_are_escaped() {
+        let out = written(vec![Entry::Include {
+            file: "/z/a\"b\n.db".into(),
+            origin: Some(Name::new("o o.")),
+        }]);
+        assert_eq!(out, "$INCLUDE \"/z/a\\\"b\\010.db\" o\\032o.\n");
+    }
+
+    #[test]
+    fn test_origin_is_escaped() {
+        assert_eq!(
+            written(vec![Entry::Origin(Name::new("$x."))]),
+            "$ORIGIN \\$x.\n"
+        );
+    }
+
+    #[test]
+    fn test_generate_fields_are_escaped() {
+        let out = written(vec![Entry::Generate(GenerateDirective {
+            range_start: 1,
+            range_end: 2,
+            range_step: None,
+            lhs: "h $".into(),
+            ttl: None,
+            class: None,
+            rtype: "A\n".into(),
+            rhs: "192.0.2.$\nevil A 6.6.6.6".into(),
+        })]);
+        assert_eq!(
+            out,
+            "$GENERATE 1-2 h\\032$ A\\010 192.0.2.$\\010evil A 6.6.6.6\n"
+        );
+    }
+
+    #[test]
+    fn test_unknown_rtype_is_escaped_and_raw_data_control_chars_escaped() {
+        let out = written(vec![make_record(
+            "u",
+            RData::Unknown {
+                rtype: "TYPE 1".into(),
+                data: "\\# 2 ab\ncd ; (x)".into(),
+            },
+        )]);
+        assert!(
+            out.ends_with("TYPE\\0321  \\# 2 ab\\010cd ; (x)\n"),
+            "{out}"
+        );
+        assert_eq!(out.lines().count(), 1);
+    }
+
+    #[test]
+    fn test_nsec_type_bitmap_has_no_trailing_space() {
+        assert_eq!(
+            rdata_text(RData::Nsec(NsecData {
+                next_domain: Name::new("n."),
+                type_bitmap: vec!["A".into(), "NS".into()],
+            })),
+            "n. A NS"
+        );
+    }
 }

@@ -38,6 +38,12 @@ Defines a DNS zone. The zone type determines its role:
 | Forward | `forward` | Forwards queries for this zone to specific servers |
 | Hint | `hint` | Root hints zone |
 | Redirect | `redirect` | Intercepts queries and returns alternate answers |
+| Static stub | `static-stub` | Stub zone with configured server addresses |
+| Delegation only | `delegation-only` | Enforces delegation-only responses (removed in BIND 9.20) |
+| In view | `in-view "view-name";` | Shares a zone defined in another view (an option, not a `type`) |
+
+A zone or view may name its class after the name: `IN` (the default), `CH` / `CHAOS`,
+`HS` / `HESIOD` or `ANY`. A zone inside a view without a class inherits the view's class.
 
 ```text
 zone "example.com" {
@@ -111,9 +117,14 @@ Defines control channels for `rndc` access.
 
 ```text
 controls {
-    inet 127.0.0.1 port 953 allow { 127.0.0.1; };
+    inet 127.0.0.1 port 953 allow { 127.0.0.1; } keys { "rndc-key"; } read-only no;
+    unix "/run/named/rndc.sock" perm 0600 owner 0 group 0;
 };
 ```
+
+`perm`, `owner` and `group` accept C-style numbers (`0600` octal, `0x180` hex, `384`
+decimal). The writer prints them in decimal, as BIND9 does. `unix` control channels were
+removed in BIND 9.20; hornet still parses and writes them for older configurations.
 
 ### `key "name" { … };`
 
@@ -182,6 +193,14 @@ allow-query {
 };
 ```
 
+The built-ins `any`, `none`, `localhost` and `localnets` are recognised only as whole,
+unquoted words. `anyone` is a reference to an ACL named `anyone`, and a quoted `"any"` is
+a reference to an ACL named `any`, not the built-in. When writing, hornet quotes an ACL
+reference whose name is a reserved word (`any`, `none`, `localhost`, `localnets`, `key`)
+or is not a plain name, so it keeps that meaning.
+
+An empty list is written as `{ }`.
+
 ---
 
 ## Legacy keyword aliases
@@ -199,11 +218,22 @@ to normalise a config file to modern keywords.
 
 ---
 
-## Unknown blocks
+## Unknown blocks and unmodelled options
 
-Hornet preserves any block it does not recognise verbatim using the
-`Statement::Unknown { keyword, body }` variant. This ensures unknown or future BIND9
-constructs do not cause parse failures.
+Hornet preserves any top-level statement it does not recognise verbatim using the
+`Statement::Unknown { keyword, raw }` variant. Its end is found with quotes and comments
+taken into account, so a `;` or `}` inside a string or comment does not cut it short. This
+ensures unknown or future BIND9 constructs do not cause parse failures.
+
+Inside `options`, `zone`, `view` and `server` blocks, an option hornet does not model, or
+a modelled option whose value falls outside its typed grammar, is kept as a
+`(key, value)` pair in the block's `extra` list.
+
+!!! danger "Trusted text only"
+    `Statement::Unknown` and `extra` are written back verbatim, with no escaping. They are
+    safe for text read from a trusted file, but anything placed in them reaches BIND9 as
+    configuration. See
+    [Raw carriers hold trusted text only](../guide/writing.md#raw-carriers-hold-trusted-text-only).
 
 ---
 

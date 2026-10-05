@@ -946,4 +946,38 @@ mod tests {
         let diags = validate_named_conf(&conf);
         assert!(!diags.iter().any(|d| d.message.contains("undefined ACL")));
     }
+
+    // ── records kept verbatim ────────────────────────────────────────────────────
+
+    fn zone_with_unknown(rtype: &str, data: &str) -> ZoneFile {
+        ZoneFile {
+            entries: vec![Entry::Record(ResourceRecord {
+                name: Some(Name::new("www")),
+                ttl: None,
+                class: None,
+                rdata: RData::Unknown {
+                    rtype: rtype.to_string(),
+                    data: data.to_string(),
+                },
+            })],
+        }
+    }
+
+    #[test]
+    fn test_modelled_type_kept_verbatim_warns() {
+        let diags = validate_zone_file(&zone_with_unknown("A", "not-an-address"));
+        let hit = diags
+            .iter()
+            .find(|d| d.message.contains("kept verbatim"))
+            .expect("warning for malformed A data");
+        assert_eq!(hit.severity, Severity::Warning);
+        assert!(hit.message.contains("A record"), "{}", hit.message);
+        assert!(hit.message.contains("not-an-address"), "{}", hit.message);
+    }
+
+    #[test]
+    fn test_unmodelled_type_does_not_warn() {
+        let diags = validate_zone_file(&zone_with_unknown("SPF", "\"v=spf1 -all\""));
+        assert!(!diags.iter().any(|d| d.message.contains("kept verbatim")));
+    }
 }

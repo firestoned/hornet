@@ -233,6 +233,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_options_dnssec_enable() {
+        let conf = parse(r"options { dnssec-enable no; };");
+        if let Statement::Options(o) = &conf.statements[0] {
+            assert_eq!(o.dnssec_enable, Some(false));
+            assert!(o.extra.is_empty(), "{:?}", o.extra);
+        } else {
+            panic!("expected Options");
+        }
+    }
+
+    #[test]
     fn test_parse_options_dnssec_validation_yes() {
         let conf = parse(r"options { dnssec-validation yes; };");
         if let Statement::Options(o) = &conf.statements[0] {
@@ -838,15 +849,13 @@ mod tests {
 
     #[test]
     fn test_parse_options_unknown_block_option_kept_in_extra() {
-        let conf = parse(
-            r#"options { rate-limit { responses-per-second 5; window 10; }; directory "/var"; };"#,
-        );
+        let conf = parse(r#"options { dnstap { client; resolver query; }; directory "/var"; };"#);
         let o = options(&conf);
         assert_eq!(
             o.extra,
             vec![(
-                "rate-limit".to_string(),
-                "{ responses-per-second 5; window 10; }".to_string()
+                "dnstap".to_string(),
+                "{ client; resolver query; }".to_string()
             )]
         );
         assert_eq!(o.directory.as_deref(), Some("/var"));
@@ -904,10 +913,10 @@ mod tests {
 
     #[test]
     fn test_parse_zone_unknown_option_kept_in_extra() {
-        let conf = parse(r#"zone "example.com" { type primary; max-journal-size 10m; };"#);
+        let conf = parse(r#"zone "example.com" { type primary; zone-statistics full; };"#);
         assert_eq!(
             zone(&conf).options.extra,
-            vec![("max-journal-size".to_string(), "10m".to_string())]
+            vec![("zone-statistics".to_string(), "full".to_string())]
         );
     }
 
@@ -1054,15 +1063,66 @@ mod tests {
     #[test]
     fn test_parse_controls_unknown_channel_is_skipped() {
         let conf = parse(
+            r"controls {
+                bogus-channel 1 2 3;
+                inet 127.0.0.1 port 953 allow { localhost; };
+            };",
+        );
+        let c = controls(&conf);
+        assert_eq!(c.inet.len(), 1);
+        assert!(c.unix.is_empty());
+        assert!(c.inet[0].keys.is_empty());
+        assert_eq!(c.inet[0].read_only, None);
+    }
+
+    #[test]
+    fn test_parse_controls_unix_channel() {
+        let conf = parse(
             r#"controls {
-                unix "/run/named/control" perm 0600 owner 0 group 0;
+                unix "/run/named/control" perm 0600 owner 101 group 102;
                 inet 127.0.0.1 port 953 allow { localhost; };
             };"#,
         );
         let c = controls(&conf);
         assert_eq!(c.inet.len(), 1);
-        assert!(c.inet[0].keys.is_empty());
-        assert_eq!(c.inet[0].read_only, None);
+        assert_eq!(
+            c.unix,
+            vec![UnixControl {
+                path: "/run/named/control".to_string(),
+                // `0600` is a C-style octal number, as BIND reads it.
+                perm: Some(0o600),
+                owner: Some(101),
+                group: Some(102),
+                keys: vec![],
+                read_only: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_parse_controls_unix_channel_with_keys_and_read_only() {
+        let conf = parse(
+            r#"controls {
+                unix "/run/c" perm 384 owner 0 group 0 keys { "rndc-key"; "other"; } read-only yes;
+            };"#,
+        );
+        let u = &controls(&conf).unix[0];
+        assert_eq!(u.perm, Some(384));
+        assert_eq!(u.keys, vec!["rndc-key".to_string(), "other".to_string()]);
+        assert_eq!(u.read_only, Some(true));
+    }
+
+    #[test]
+    fn test_parse_controls_unix_hex_perm() {
+        let conf = parse(r#"controls { unix "/run/c" perm 0x180 owner 0 group 0; };"#);
+        assert_eq!(controls(&conf).unix[0].perm, Some(0o600));
+    }
+
+    #[test]
+    fn test_parse_controls_inet_keys_requires_whole_keyword() {
+        // `keysx` is not the `keys` clause, so the channel is malformed.
+        let conf = parse(r#"controls { inet 127.0.0.1 port 953 allow { any; } keysx { "k"; }; };"#);
+        assert_eq!(unknown(&conf).0, "controls");
     }
 
     #[test]
@@ -1177,6 +1237,8 @@ mod tests {
         ("options", "options { recursion maybe; };"),
         ("options", "options { recursion yes x; };"),
         ("options", "options { notify yes x; };"),
+        ("options", "options { dnssec-enable maybe; };"),
+        ("options", "options { dnssec-enable yes x; };"),
         ("options", "options { dnssec-validation maybe; };"),
         ("options", "options { dnssec-validation auto x; };"),
         ("options", "options { max-cache-size lots; };"),
@@ -1212,6 +1274,13 @@ mod tests {
         ("zone", r#"zone "a" { key-directory "/k" x; };"#),
         ("zone", r#"zone "a" { journal ; };"#),
         ("zone", r#"zone "a" { journal "/j" x; };"#),
+        // BIND has no `in-view` zone type (it is a zone option) and no
+        // `delegation` type (it is `delegation-only`).
+        ("zone", r#"zone "a" { type in-view "v"; };"#),
+        ("zone", r#"zone "a" { type delegation; };"#),
+        ("zone", r#"zone "a" { in-view ; };"#),
+        ("zone", r#"zone "a" { in-view "v" x; };"#),
+        ("primaries", "primaries p { 192.0.2.1 tls ; };"),
         // acl
         ("acl", "acl { any; };"),
         ("acl", "acl a any;"),
@@ -1308,6 +1377,49 @@ mod tests {
             "controls",
             "controls { inet 127.0.0.1 port 953 allow { any; } bogus; };",
         ),
+        (
+            "controls",
+            "controls { unix /run/c perm 0600 owner 0 group 0; };",
+        ),
+        ("controls", r#"controls { unix "/c" owner 0 group 0; };"#),
+        (
+            "controls",
+            r#"controls { unix "/c" perm x owner 0 group 0; };"#,
+        ),
+        ("controls", r#"controls { unix "/c" perm 0600 group 0; };"#),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 0600 owner x group 0; };"#,
+        ),
+        ("controls", r#"controls { unix "/c" perm 0600 owner 0; };"#),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 0600 owner 0 group x; };"#,
+        ),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 09 owner 0 group 0; };"#,
+        ),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 0xZZ owner 0 group 0; };"#,
+        ),
+        (
+            "controls",
+            r#"controls { unix "/c" perm "0600" owner 0 group 0; };"#,
+        ),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 0600 owner 0 group 0 keys x; };"#,
+        ),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 0600 owner 0 group 0 read-only maybe; };"#,
+        ),
+        (
+            "controls",
+            r#"controls { unix "/c" perm 0600 owner 0 group 0 bogus; };"#,
+        ),
         // key
         ("key", "key { };"),
         ("key", "key k x;"),
@@ -1361,5 +1473,657 @@ mod tests {
     #[test]
     fn test_parse_unknown_statement_without_terminator_is_an_error() {
         assert!(parse_named_conf("tls local { cert-file x").is_err());
+    }
+
+    // ── Keywords match whole words only ────────────────────────────────────────
+
+    #[test]
+    fn test_parse_statement_keyword_must_be_a_whole_word() {
+        let conf = parse(r#"zonex "a" { type hint; };"#);
+        assert_eq!(unknown(&conf).0, "zonex");
+    }
+
+    #[test]
+    fn test_parse_statement_keyword_is_case_insensitive() {
+        let conf = parse(r#"ZONE "a" { type hint; };"#);
+        assert_eq!(zone(&conf).name, "a");
+    }
+
+    #[test]
+    fn test_parse_zone_type_value_must_be_a_whole_word() {
+        let conf = parse(r#"zone "a" { type forwardx; };"#);
+        assert_eq!(unknown(&conf).0, "zone");
+    }
+
+    /// The cost of matching a statement keyword must not depend on how much
+    /// input follows it. A matcher that copies the remaining input on every
+    /// attempt makes parsing quadratic.
+    ///
+    /// `lead` is a few hundred small statements in front of one 16 MB
+    /// statement; `tail` is the 16 MB statement alone. Parsed linearly, `lead`
+    /// costs about what `tail` does. With a copying matcher every leading
+    /// statement copies the 16 MB at least twice (gigabytes in all), so `lead`
+    /// takes many times longer. Comparing the two on the same machine, fastest
+    /// of several runs, keeps the test independent of machine speed and build
+    /// profile.
+    #[test]
+    fn test_parse_time_does_not_depend_on_remaining_input() {
+        const LEADING_STATEMENTS: usize = 300;
+        const TAIL_BYTES: usize = 16 * 1024 * 1024;
+        const RUNS: usize = 3;
+        const MAX_RATIO: f64 = 3.0;
+
+        fn fastest_parse(text: &str) -> std::time::Duration {
+            (0..RUNS)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    let conf = parse_named_conf(text).expect("parse");
+                    let elapsed = start.elapsed();
+                    assert!(!conf.statements.is_empty());
+                    elapsed
+                })
+                .min()
+                .expect("at least one run")
+        }
+
+        let tail = format!("big-statement \"{}\";\n", "a".repeat(TAIL_BYTES));
+        let lead: String = (0..LEADING_STATEMENTS)
+            .map(|i| format!("zone \"z{i}.example\" {{ type hint; }};\n"))
+            .chain(std::iter::once(tail.clone()))
+            .collect();
+
+        let tail_time = fastest_parse(&tail);
+        let lead_time = fastest_parse(&lead);
+        let ratio = lead_time.as_secs_f64() / tail_time.as_secs_f64();
+        assert!(
+            ratio < MAX_RATIO,
+            "{LEADING_STATEMENTS} small statements before a {TAIL_BYTES}-byte one took \
+             {ratio:.1}x as long as the large one alone ({tail_time:?} -> {lead_time:?})"
+        );
+    }
+
+    // ── Address-match literals match whole words only ─────────────────────────
+
+    #[test]
+    fn test_parse_acl_names_starting_with_reserved_words_are_references() {
+        let conf = parse(
+            "options { allow-query { anyone; nonexistent; localhostx; localnets2; keyring; }; };",
+        );
+        assert_eq!(
+            options(&conf).allow_query,
+            Some(vec![
+                AddressMatchElement::AclRef("anyone".to_string()),
+                AddressMatchElement::AclRef("nonexistent".to_string()),
+                AddressMatchElement::AclRef("localhostx".to_string()),
+                AddressMatchElement::AclRef("localnets2".to_string()),
+                AddressMatchElement::AclRef("keyring".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_address_match_reserved_words_still_match() {
+        let conf =
+            parse(r#"options { allow-query { any; none; localhost; localnets; key "k"; }; };"#);
+        assert_eq!(
+            options(&conf).allow_query,
+            Some(vec![
+                AddressMatchElement::Any,
+                AddressMatchElement::None,
+                AddressMatchElement::Localhost,
+                AddressMatchElement::Localnets,
+                AddressMatchElement::Key("k".to_string()),
+            ])
+        );
+    }
+
+    // ── Quoted strings honour escapes ──────────────────────────────────────────
+
+    #[test]
+    fn test_parse_zone_name_with_escaped_quote() {
+        let conf = parse(r#"zone "a\"b" { type hint; file "f"; };"#);
+        assert_eq!(zone(&conf).name, "a\"b");
+    }
+
+    // ── Raw capture skips quoted strings and comments ─────────────────────────
+
+    #[test]
+    fn test_parse_unknown_option_with_semicolon_and_brace_in_quotes() {
+        let conf = parse(r#"options { tkey-domain "a;b}c"; directory "/d"; };"#);
+        let o = options(&conf);
+        assert_eq!(
+            o.extra,
+            vec![("tkey-domain".to_string(), r#""a;b}c""#.to_string())]
+        );
+        assert_eq!(o.directory.as_deref(), Some("/d"));
+    }
+
+    #[test]
+    fn test_parse_unknown_option_with_escaped_quote_in_string() {
+        let conf = parse(r#"options { tkey-domain "a\";b"; directory "/d"; };"#);
+        let o = options(&conf);
+        assert_eq!(o.extra[0].1, r#""a\";b""#);
+        assert_eq!(o.directory.as_deref(), Some("/d"));
+    }
+
+    #[test]
+    fn test_parse_unknown_option_comments_are_skipped_not_captured() {
+        let conf = parse(
+            "options {\n  tkey-domain x # a;b\n  /* c;} */ y // d;\n  ;\n  directory \"/d\";\n};",
+        );
+        let o = options(&conf);
+        assert_eq!(
+            o.extra,
+            vec![("tkey-domain".to_string(), "x y".to_string())]
+        );
+        assert_eq!(o.directory.as_deref(), Some("/d"));
+    }
+
+    #[test]
+    fn test_parse_unknown_option_unterminated_string_runs_to_end() {
+        // An unterminated string swallows the rest of the input, so the block
+        // never closes and the whole document is rejected.
+        assert!(parse_named_conf(r#"options { tkey-domain "a; directory "/d"; };"#).is_err());
+    }
+
+    #[test]
+    fn test_parse_unknown_option_unterminated_block_comment_runs_to_end() {
+        assert!(parse_named_conf("options { tkey-domain a /* ; }; };").is_err());
+    }
+
+    #[test]
+    fn test_parse_unknown_statement_with_quoted_brace_and_semicolon() {
+        let conf = parse("tls local { ca-file \"a;}b\"; // }\n };\nacl after { any; };");
+        // Whitespace containing a comment collapses to one space; the rest is verbatim.
+        assert_eq!(unknown(&conf), ("tls", "local { ca-file \"a;}b\"; }"));
+        assert!(matches!(conf.statements.last(), Some(Statement::Acl(a)) if a.name == "after"));
+    }
+
+    // ── DNS classes ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_dns_class_spellings_match_bind() {
+        for (text, class) in [
+            ("IN", DnsClass::In),
+            ("in", DnsClass::In),
+            ("In", DnsClass::In),
+            ("CH", DnsClass::Chaos),
+            ("ch", DnsClass::Chaos),
+            ("CHAOS", DnsClass::Chaos),
+            ("ChAoS", DnsClass::Chaos),
+            ("HS", DnsClass::Hs),
+            ("hs", DnsClass::Hs),
+            ("HESIOD", DnsClass::Hs),
+            ("hesiod", DnsClass::Hs),
+            ("ANY", DnsClass::Any),
+            ("any", DnsClass::Any),
+        ] {
+            let conf = parse(&format!(r#"view "v" {text} {{ }};"#));
+            let Statement::View(v) = &conf.statements[0] else {
+                panic!("{text}: expected View, got {:?}", conf.statements[0]);
+            };
+            assert_eq!(v.class, Some(class), "{text}");
+        }
+    }
+
+    #[test]
+    fn test_parse_dns_class_must_be_a_whole_word() {
+        let conf = parse(r#"zone "a" INX { type hint; };"#);
+        assert_eq!(unknown(&conf).0, "zone");
+    }
+
+    // ── Options and zone fields the writer emits ──────────────────────────────
+
+    #[test]
+    fn test_parse_options_memstatistics_file() {
+        let conf = parse(r#"options { memstatistics-file "/var/named/mem.stats"; };"#);
+        assert_eq!(
+            options(&conf).memstatistics_file.as_deref(),
+            Some("/var/named/mem.stats")
+        );
+    }
+
+    #[test]
+    fn test_parse_options_rate_limit_all_fields() {
+        let conf = parse(
+            "options { rate-limit {
+                responses-per-second 10; referrals-per-second 11; nodata-per-second 12;
+                nxdomains-per-second 13; errors-per-second 14; all-per-second 15;
+                window 16; log-only yes; slip 2;
+            }; };",
+        );
+        assert_eq!(
+            options(&conf).rate_limit,
+            Some(RateLimit {
+                responses_per_second: Some(10),
+                referrals_per_second: Some(11),
+                nodata_per_second: Some(12),
+                nxdomains_per_second: Some(13),
+                errors_per_second: Some(14),
+                all_per_second: Some(15),
+                window: Some(16),
+                log_only: Some(true),
+                slip: Some(2),
+            })
+        );
+        assert!(options(&conf).extra.is_empty());
+    }
+
+    #[test]
+    fn test_parse_options_rate_limit_empty_block() {
+        let conf = parse("options { rate-limit { }; };");
+        assert_eq!(options(&conf).rate_limit, Some(RateLimit::default()));
+    }
+
+    #[test]
+    fn test_parse_options_rate_limit_with_unmodelled_option_is_kept_raw() {
+        // Typed parsing would drop `exempt-clients`, so the whole block is kept verbatim.
+        let conf = parse(
+            "options { rate-limit { responses-per-second 5; exempt-clients { 10.0.0.1; }; }; };",
+        );
+        let o = options(&conf);
+        assert_eq!(o.rate_limit, None);
+        assert_eq!(
+            o.extra,
+            vec![(
+                "rate-limit".to_string(),
+                "{ responses-per-second 5; exempt-clients { 10.0.0.1; }; }".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_options_rate_limit_with_malformed_value_is_kept_raw() {
+        for body in [
+            "{ responses-per-second many; }",
+            "{ log-only maybe; }",
+            "{ log-only yes no; }",
+            "{ \"window\" 5; }",
+            "{ slip 2 3; }",
+            "{ slip 2; } x",
+            "slip",
+        ] {
+            let conf = parse(&format!("options {{ rate-limit {body}; }};"));
+            let o = options(&conf);
+            assert_eq!(o.rate_limit, None, "{body}");
+            assert_eq!(o.extra, vec![("rate-limit".to_string(), body.to_string())]);
+        }
+    }
+
+    #[test]
+    fn test_parse_zone_update_policy_rules() {
+        let conf = parse(
+            r#"zone "a" { type primary; file "a.db"; update-policy {
+                grant "key-a." zonesub ANY;
+                deny key-b. name host.a. A AAAA;
+                grant *.a. self *.a. A;
+                grant k. subdomain a.;
+            }; };"#,
+        );
+        assert_eq!(
+            zone(&conf).options.update_policy,
+            Some(UpdatePolicy {
+                rules: vec![
+                    UpdatePolicyRule {
+                        action: UpdateAction::Grant,
+                        identity: "key-a.".to_string(),
+                        name_type: "zonesub".to_string(),
+                        name: None,
+                        types: vec!["ANY".to_string()],
+                    },
+                    UpdatePolicyRule {
+                        action: UpdateAction::Deny,
+                        identity: "key-b.".to_string(),
+                        name_type: "name".to_string(),
+                        name: Some("host.a.".to_string()),
+                        types: vec!["A".to_string(), "AAAA".to_string()],
+                    },
+                    UpdatePolicyRule {
+                        action: UpdateAction::Grant,
+                        identity: "*.a.".to_string(),
+                        name_type: "self".to_string(),
+                        name: Some("*.a.".to_string()),
+                        types: vec!["A".to_string()],
+                    },
+                    UpdatePolicyRule {
+                        action: UpdateAction::Grant,
+                        identity: "k.".to_string(),
+                        name_type: "subdomain".to_string(),
+                        name: Some("a.".to_string()),
+                        types: vec![],
+                    },
+                ]
+            })
+        );
+        assert!(zone(&conf).options.extra.is_empty());
+    }
+
+    #[test]
+    fn test_parse_zone_update_policy_local_is_kept_raw() {
+        let conf = parse(r#"zone "a" { type primary; file "a.db"; update-policy local; };"#);
+        let z = zone(&conf);
+        assert_eq!(z.options.update_policy, None);
+        assert_eq!(
+            z.options.extra,
+            vec![("update-policy".to_string(), "local".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_parse_zone_update_policy_malformed_is_kept_raw() {
+        for body in [
+            "{ permit k. zonesub ANY; }",
+            "{ grant; }",
+            "{ grant k.; }",
+            "{ grant k. zonesub ANY }",
+            "{ grant k. zonesub ANY; } x",
+        ] {
+            let conf = parse(&format!(
+                r#"zone "a" {{ type primary; update-policy {body}; }};"#
+            ));
+            let z = zone(&conf);
+            assert_eq!(z.options.update_policy, None, "{body}");
+            assert_eq!(
+                z.options.extra,
+                vec![("update-policy".to_string(), body.to_string())],
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_zone_forwarders() {
+        let conf = parse(
+            r#"zone "a" { type forward; forward only; forwarders { 192.0.2.1; 2001:db8::1; }; };"#,
+        );
+        assert_eq!(
+            zone(&conf).options.forwarders,
+            vec![ip("192.0.2.1"), ip("2001:db8::1")]
+        );
+    }
+
+    #[test]
+    fn test_parse_zone_forwarders_with_port_kept_raw() {
+        // The AST models plain addresses only, so a port keeps the option raw.
+        let conf = parse(r#"zone "a" { type forward; forwarders { 192.0.2.1 port 5353; }; };"#);
+        let z = zone(&conf);
+        assert!(z.options.forwarders.is_empty());
+        assert_eq!(
+            z.options.extra,
+            vec![(
+                "forwarders".to_string(),
+                "{ 192.0.2.1 port 5353; }".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_options_memstatistics_file_malformed_kept_raw() {
+        let conf = parse("options { memstatistics-file a b; };");
+        let o = options(&conf);
+        assert_eq!(o.memstatistics_file, None);
+        assert_eq!(
+            o.extra,
+            vec![("memstatistics-file".to_string(), "a b".to_string())]
+        );
+    }
+
+    // ── Quoted ACL references ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_quoted_acl_references() {
+        let conf = parse(
+            r#"options { allow-query { "trusted-nets"; !"blocked"; "any"; "none"; "localhost"; "localnets"; }; };"#,
+        );
+        assert_eq!(
+            options(&conf).allow_query,
+            Some(vec![
+                AddressMatchElement::AclRef("trusted-nets".to_string()),
+                AddressMatchElement::Negated(Box::new(AddressMatchElement::AclRef(
+                    "blocked".to_string()
+                ))),
+                // A quoted reserved word names an ACL; only the bareword is the keyword.
+                AddressMatchElement::AclRef("any".to_string()),
+                AddressMatchElement::AclRef("none".to_string()),
+                AddressMatchElement::AclRef("localhost".to_string()),
+                AddressMatchElement::AclRef("localnets".to_string()),
+            ])
+        );
+    }
+
+    // ── Zone types as BIND spells them ─────────────────────────────────────────
+
+    #[test]
+    fn test_parse_zone_in_view_option() {
+        let conf = parse(r#"zone "a" { in-view "internal"; };"#);
+        assert_eq!(
+            zone(&conf).options.zone_type,
+            Some(ZoneType::InView("internal".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_parse_zone_type_delegation_only() {
+        let conf = parse(r#"zone "a" { type delegation-only; };"#);
+        assert_eq!(zone(&conf).options.zone_type, Some(ZoneType::Delegation));
+    }
+
+    #[test]
+    fn test_parse_zone_type_static_stub() {
+        let conf = parse(r#"zone "a" { type static-stub; };"#);
+        assert_eq!(zone(&conf).options.zone_type, Some(ZoneType::Static));
+    }
+
+    // ── Further options, zone and server fields ────────────────────────────────
+
+    #[test]
+    fn test_parse_options_additional_fields() {
+        let conf = parse(
+            r#"options {
+                session-keyfile "/run/named/session.key";
+                allow-update { key "ddns"; };
+                max-cache-ttl 86400;
+                min-cache-ttl 30;
+                response-policy {
+                    zone "rpz.local";
+                    zone "rpz.block" policy nxdomain;
+                    zone "rpz.walled" policy cname walled.example.;
+                };
+            };"#,
+        );
+        let o = options(&conf);
+        assert_eq!(o.session_keyfile.as_deref(), Some("/run/named/session.key"));
+        assert_eq!(
+            o.allow_update,
+            Some(vec![AddressMatchElement::Key("ddns".to_string())])
+        );
+        assert_eq!(o.max_cache_ttl, Some(86_400));
+        assert_eq!(o.min_cache_ttl, Some(30));
+        assert_eq!(
+            o.response_policy,
+            vec![
+                ResponsePolicy {
+                    zone: "rpz.local".to_string(),
+                    policy: None,
+                },
+                ResponsePolicy {
+                    zone: "rpz.block".to_string(),
+                    policy: Some("nxdomain".to_string()),
+                },
+                ResponsePolicy {
+                    zone: "rpz.walled".to_string(),
+                    policy: Some("cname walled.example.".to_string()),
+                },
+            ]
+        );
+        assert!(o.extra.is_empty(), "{:?}", o.extra);
+    }
+
+    #[test]
+    fn test_parse_options_untypable_values_kept_raw() {
+        for (key, value) in [
+            ("max-cache-ttl", "1w"),
+            ("min-cache-ttl", "x y"),
+            ("session-keyfile", "a b"),
+            ("response-policy", "{ zone \"r\"; } qname-wait-recurse no"),
+            ("response-policy", "{ zone \"r\" max-policy-ttl 5; }"),
+            ("response-policy", "{ zone; }"),
+            ("response-policy", "{ zone \"r\" policy; }"),
+            ("response-policy", "{ \"r\"; }"),
+            ("response-policy", "x"),
+        ] {
+            let conf = parse(&format!("options {{ {key} {value}; }};"));
+            let o = options(&conf);
+            assert_eq!(o.extra, vec![(key.to_string(), value.to_string())], "{key}");
+            assert_eq!(o.max_cache_ttl, None);
+            assert_eq!(o.min_cache_ttl, None);
+            assert_eq!(o.session_keyfile, None);
+            assert!(o.response_policy.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_parse_zone_additional_fields() {
+        let conf = parse(
+            r#"zone "a" {
+                type primary;
+                notify-source 192.0.2.53;
+                check-names warn;
+                auto-dnssec maintain;
+                max-journal-size 10m;
+            };
+            zone "b" { type secondary; notify-source-v6 2001:db8::53; check-names fail; auto-dnssec allow; };
+            zone "c" { type secondary; check-names ignore; auto-dnssec off; };"#,
+        );
+        let Statement::Zone(a) = &conf.statements[0] else {
+            panic!("expected Zone");
+        };
+        assert_eq!(a.options.notify_source, Some(ip("192.0.2.53")));
+        assert_eq!(a.options.check_names, Some(CheckNames::Warn));
+        assert_eq!(a.options.auto_dnssec, Some(AutoDnssec::Maintain));
+        assert_eq!(a.options.max_journal_size, Some(SizeSpec::Megabytes(10)));
+        assert!(a.options.extra.is_empty(), "{:?}", a.options.extra);
+        let Statement::Zone(b) = &conf.statements[1] else {
+            panic!("expected Zone");
+        };
+        assert_eq!(b.options.notify_source, Some(ip("2001:db8::53")));
+        assert_eq!(b.options.check_names, Some(CheckNames::Fail));
+        assert_eq!(b.options.auto_dnssec, Some(AutoDnssec::Allow));
+        let Statement::Zone(c) = &conf.statements[2] else {
+            panic!("expected Zone");
+        };
+        assert_eq!(c.options.check_names, Some(CheckNames::Ignore));
+        assert_eq!(c.options.auto_dnssec, Some(AutoDnssec::Off));
+    }
+
+    #[test]
+    fn test_parse_zone_untypable_values_kept_raw() {
+        for (key, value) in [
+            ("notify-source", "*"),
+            ("notify-source", "192.0.2.1 port 53"),
+            // `notify-source` takes IPv4 and `notify-source-v6` IPv6.
+            ("notify-source", "2001:db8::1"),
+            ("notify-source-v6", "192.0.2.1"),
+            ("check-names", "sometimes"),
+            ("auto-dnssec", "sometimes"),
+            ("max-journal-size", "huge"),
+        ] {
+            let conf = parse(&format!(r#"zone "a" {{ {key} {value}; }};"#));
+            let z = zone(&conf);
+            assert_eq!(
+                z.options.extra,
+                vec![(key.to_string(), value.to_string())],
+                "{key}"
+            );
+            assert_eq!(z.options.notify_source, None);
+            assert_eq!(z.options.check_names, None);
+            assert_eq!(z.options.auto_dnssec, None);
+            assert_eq!(z.options.max_journal_size, None);
+        }
+    }
+
+    #[test]
+    fn test_parse_server_additional_fields() {
+        let conf = parse(
+            "server 192.0.2.1 {
+                transfer-format many-answers;
+                transfer-source 192.0.2.10;
+                notify-source 192.0.2.11;
+                query-source address 192.0.2.12;
+                send-cookie yes;
+                edns-version 0;
+            };
+            server 2001:db8::1 {
+                transfer-format one-answer;
+                transfer-source-v6 2001:db8::10;
+                notify-source-v6 2001:db8::11;
+                query-source-v6 2001:db8::12;
+            };",
+        );
+        let Statement::Server(s4) = &conf.statements[0] else {
+            panic!("expected Server");
+        };
+        let o = &s4.options;
+        assert_eq!(o.transfer_format, Some(TransferFormat::ManyAnswers));
+        assert_eq!(o.transfer_source, Some(ip("192.0.2.10")));
+        assert_eq!(o.notify_source, Some(ip("192.0.2.11")));
+        assert_eq!(o.query_source, Some(ip("192.0.2.12")));
+        assert_eq!(o.send_cookie, Some(true));
+        assert_eq!(o.edns_version, Some(0));
+        assert!(o.extra.is_empty(), "{:?}", o.extra);
+        let Statement::Server(s6) = &conf.statements[1] else {
+            panic!("expected Server");
+        };
+        let o = &s6.options;
+        assert_eq!(o.transfer_format, Some(TransferFormat::OneAnswer));
+        assert_eq!(o.transfer_source, Some(ip("2001:db8::10")));
+        assert_eq!(o.notify_source, Some(ip("2001:db8::11")));
+        assert_eq!(o.query_source, Some(ip("2001:db8::12")));
+        assert!(o.extra.is_empty(), "{:?}", o.extra);
+    }
+
+    #[test]
+    fn test_parse_server_untypable_values_kept_raw() {
+        for (key, value) in [
+            ("transfer-format", "some-answers"),
+            ("transfer-source", "*"),
+            ("transfer-source-v6", "192.0.2.1"),
+            ("notify-source", "192.0.2.1 port 53"),
+            ("query-source", "address *"),
+            ("query-source-v6", "address 192.0.2.1"),
+            ("send-cookie", "maybe"),
+            ("edns-version", "300"),
+        ] {
+            let conf = parse(&format!("server 192.0.2.1 {{ {key} {value}; }};"));
+            let Statement::Server(s) = &conf.statements[0] else {
+                panic!("{key}: expected Server, got {:?}", conf.statements[0]);
+            };
+            assert_eq!(
+                s.options.extra,
+                vec![(key.to_string(), value.to_string())],
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_primaries_entry_with_tls() {
+        let conf = parse(
+            r#"primaries "p" { 192.0.2.1 port 853 key "k" tls "dot"; 192.0.2.2 tls ephemeral; };"#,
+        );
+        let Statement::Primaries(p) = &conf.statements[0] else {
+            panic!("expected Primaries");
+        };
+        assert_eq!(p.servers[0].port, Some(853));
+        assert_eq!(p.servers[0].key.as_deref(), Some("k"));
+        assert_eq!(p.servers[0].tls.as_deref(), Some("dot"));
+        assert_eq!(p.servers[1].tls.as_deref(), Some("ephemeral"));
+    }
+
+    #[test]
+    fn test_parse_zone_empty_forwarders() {
+        let conf = parse(r#"zone "a" { type forward; forwarders { }; };"#);
+        assert!(zone(&conf).options.forwarders.is_empty());
+        assert!(zone(&conf).options.extra.is_empty());
     }
 }

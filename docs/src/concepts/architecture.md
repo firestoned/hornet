@@ -49,7 +49,7 @@ NamedConf
     ├── Statement::Primaries(PrimariesStmt)
     ├── Statement::Server(ServerStmt)
     ├── Statement::Include(String)
-    └── Statement::Unknown { keyword, body }
+    └── Statement::Unknown { keyword, raw }   (raw carrier, written verbatim)
 ```
 
 ### `zone_file` AST
@@ -60,19 +60,20 @@ The top-level type is `ZoneFile`, which contains a `Vec<Entry>`.
 ```
 ZoneFile
 └── Vec<Entry>
-    ├── Entry::Origin(String)       — $ORIGIN directive
-    ├── Entry::Ttl(u32)             — $TTL directive
-    ├── Entry::Include(String)      — $INCLUDE directive
-    ├── Entry::Generate { ... }     — $GENERATE directive
+    ├── Entry::Origin(Name)                    $ORIGIN directive
+    ├── Entry::Ttl(u32)                        $TTL directive
+    ├── Entry::Include { file, origin }        $INCLUDE directive
+    ├── Entry::Generate(GenerateDirective)     $GENERATE directive
+    ├── Entry::Blank
     └── Entry::Record(ResourceRecord)
         └── rdata: RData
             ├── RData::A(Ipv4Addr)
             ├── RData::Aaaa(Ipv6Addr)
-            ├── RData::Ns(DomainName)
-            ├── RData::Mx { priority, exchange }
-            ├── RData::Soa { ... }
-            ├── RData::Cname(DomainName)
-            └── ... (24+ variants)
+            ├── RData::Ns(Name)
+            ├── RData::Mx(MxData)
+            ├── RData::Soa(SoaData)
+            ├── RData::Loc / Rrsig / Nsec3 / Nsec3param / ...
+            └── RData::Unknown { rtype, data }  (unmodelled or malformed data, verbatim)
 ```
 
 ---
@@ -83,8 +84,19 @@ Parsers are built with [winnow](https://docs.rs/winnow), a fast, zero-copy parse
 library. The `common.rs` module provides shared primitives (whitespace, comments, quoted strings,
 domain names, IP addresses) reused by both the `named_conf` and `zone_file` parsers.
 
-Parsers are internal (`pub(crate)`) and exposed only through the top-level convenience functions
-in `lib.rs`.
+The parser modules are public, but most callers use the top-level convenience functions in
+`lib.rs`, which wrap parser failures in `Error::Parse`.
+
+The parsers are written to read text the way BIND9 does: keywords and address-match
+literals match whole words only, quoted strings end at the first unescaped `"`,
+unmodelled statements are scanned with quotes and comments skipped, and zone-file escapes
+(`\DDD`, `\X`) are decoded in character-strings. Keyword matching compares only a
+keyword-length prefix, so parse time is linear in the input size.
+
+Nothing is dropped silently. In `named.conf`, values outside a typed grammar are kept in
+the block's `extra` list. In zone files, malformed record data is kept as
+`RData::Unknown`, and a line that is neither a record nor a known directive is a parse
+error naming the line.
 
 ---
 
@@ -96,6 +108,14 @@ are controlled by [`WriteOptions`](../reference/write-options.md).
 
 Writers are deterministic: the same AST with the same `WriteOptions` always produces
 identical output.
+
+Writers are also injection-safe for every modelled field. Each string is quoted, escaped,
+or written bare according to its position, so no value can end its token and start new
+statements or records
+([ADR-0003](https://github.com/firestoned/hornet/blob/main/docs/adr/0003-writer-escaping-contract-and-input-hardening.md)).
+The writer stays infallible. The raw carriers (`extra`, `Statement::Unknown`,
+`RData::Unknown`) are the exception: they are written verbatim and must only hold trusted
+text. See [Escaping and injection safety](../guide/writing.md#escaping-and-injection-safety).
 
 ---
 
@@ -118,8 +138,8 @@ decide their own tolerance threshold.
 Hornet uses [`thiserror`](https://crates.io/crates/thiserror) for its `Error` enum
 and [`miette`](https://crates.io/crates/miette) for rich diagnostic rendering.
 
-Parse errors include the source text and a byte-range span, enabling pretty-printed
-output with the offending line highlighted — identical to what `rustc` produces.
+Parse errors include the source name and the source text for `miette` rendering. Zone-file
+errors also name the failing line in their message.
 
 See [Error Types](../reference/error-types.md) for the full type inventory.
 
@@ -130,5 +150,5 @@ See [Error Types](../reference/error-types.md) for the full type inventory.
 - **No IO in the AST or parser** — `parse_named_conf_file()` reads the file and delegates
   to `parse_named_conf()`. The parser itself never touches the filesystem.
 - **No mutation of the AST** — validation and writing both take `&AST` (shared reference).
-- **Zero unsafe code** — the entire codebase is `#![forbid(unsafe_code)]`.
+- **No unsafe code**: the codebase contains no `unsafe` blocks.
 - **Feature-gated serde** — AST types are lean by default; serialisation is opt-in.

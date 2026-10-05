@@ -4,13 +4,13 @@
 //! Semantic validation of parsed BIND9 configuration.
 //!
 //! Call [`validate_named_conf`] or [`validate_zone_file`] to get a list of
-//! [`Diagnostic`]s. Validation never mutates the AST; it only reports findings.
+//! [`ValidationError`]s. Validation never mutates the AST; it only reports findings.
 
 use crate::ast::named_conf::{
     AddressMatchElement, DnssecValidation, KeyStmt, LogDestination, LoggingBlock, NamedConf,
     OptionsBlock, Statement, ViewStmt, ZoneStmt, ZoneType,
 };
-use crate::ast::zone_file::{Entry, RData, ZoneFile};
+use crate::ast::zone_file::{Entry, RData, ZoneFile, MODELLED_RTYPES};
 use crate::error::{Severity, ValidationError};
 
 /// Run all validations on a parsed `named.conf` AST.
@@ -355,6 +355,15 @@ pub fn validate_zone_file(zone: &ZoneFile) -> Vec<ValidationError> {
                     has_soa = true;
                 }
                 RData::Ns(_) => has_ns = true,
+                RData::Unknown { rtype, data } if MODELLED_RTYPES.contains(&rtype.as_str()) => {
+                    diags.push(ValidationError {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "{rtype} record data `{data}` is not valid {rtype} syntax; kept verbatim"
+                        ),
+                        location: None,
+                    });
+                }
                 RData::Txt(parts) => {
                     let total: usize = parts.iter().map(String::len).sum();
                     if total > 65535 {

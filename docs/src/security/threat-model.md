@@ -1,8 +1,8 @@
 # Threat Model
 
 **Last Updated:** 2026-10-05
-**Version:** 1.1
-**Last full pass 2026-10-05, against ADR-0001 ... ADR-0002**
+**Version:** 1.2
+**Last full pass 2026-10-05, against ADR-0001 ... ADR-0003**
 
 This is hornet's threat model: what it protects, who can reach it, where the
 trust boundaries are, and which control (or accepted risk, or open finding)
@@ -10,8 +10,10 @@ answers each threat. It is maintained under the Architecture Driven Development
 rule (`.claude/rules/architecture-driven-development.md`): every implemented ADR
 ends with a full pass over this page and a bump of the stamp above.
 
-This pass was verified against `main` @ `10fee80` by reading `src/` and by
-running probes against the library.
+The first pass was verified against `main` @ `10fee80` by reading `src/` and by
+running probes against the library. The third pass (v1.2) re-verified every
+row against the 0.2.0 tree after ADR-0003, with the injection payloads from
+section 6 run through real BIND9 9.18 and 9.20.
 
 ---
 
@@ -88,13 +90,13 @@ flowchart LR
 
 | # | STRIDE | Threat | Boundary | Control / disposition |
 |---|---|---|---|---|
-| T1 | **T**ampering | A string in an AST field breaks out of its quoting in the writer and injects directives or records into the emitted config | TB2, TB3 | Partial. `named.conf` quoted fields go through `writer::escape` (escapes `"` and `\`), so a quoted value cannot close its own string. Other writer paths: open finding, tracked privately (section 6). The raw carriers (`extra`, `Statement::Unknown`, `RData::Unknown`) are emitted verbatim by design and must only hold trusted text. |
-| T2 | **T**ampering | hornet's parse differs from BIND9's, so a config passes hornet's validator but BIND9 loads something else | TB1, TB3 | Open finding, tracked privately (section 6). Mitigated going forward by the BIND9 e2e oracle (ADR-0001), which catches writer output BIND rejects but not parser divergence on input. |
-| T3 | **D**enial of service | Crafted or merely large input makes parsing super-linear | TB1 | Open finding, tracked privately (section 6). |
+| T1 | **T**ampering | A string in an AST field breaks out of its quoting in the writer and injects directives or records into the emitted config | TB2, TB3 | **Controlled** (ADR-0003, F2/F3 fixed). Every modelled string has one treatment by position: string positions are always quoted and escaped; name and keyword positions are bare only when plain and not reserved, otherwise quoted; zone files use RFC 1035 escaping (`\"`, `\\`, `\DDD`) for character-strings, names and tokens. Injection payloads in every position stay one token in real BIND9. The raw carriers (`extra`, `Statement::Unknown`, `RData::Unknown`) remain verbatim by design and are documented as trusted-input only; zone raw fields still have control characters escaped, so they cannot start a new line. |
+| T2 | **T**ampering | hornet's parse differs from BIND9's, so a config passes hornet's validator but BIND9 loads something else | TB1, TB3 | **Controlled** (ADR-0003, F4/F5/F7 fixed): quoted strings honour `\"`; unmodelled statements are captured quote- and comment-aware; keywords and address-match literals match whole words; zone files use only `;` comments and decode `\DDD`. Zone lines hornet cannot read are a parse error with a line number instead of being skipped, and record data that does not match its type is kept verbatim with a validator warning, so nothing disappears from the AST. Residual: hornet still accepts some inputs BIND rejects (verbatim records, unmodelled options), which is why the validator is advisory and AR3 stands. The e2e oracle (ADR-0001) compares BIND's canonical form of each fixture with hornet's output. |
+| T3 | **D**enial of service | Crafted or merely large input makes parsing super-linear | TB1 | **Controlled** (ADR-0003, F1 fixed). Keyword matching compares only the keyword-length prefix; a regression test asserts parse time does not depend on the size of the remaining input. |
 | T4 | **D**enial of service | Deep nesting overflows the stack | TB1 | **Not exposed.** The named.conf grammar hornet implements is not recursive: address-match-list negation is one level (`!elem`), nested `{ }` lists are not parsed, views contain zones only, and the `Unknown` statement fallback (`unknown_stmt`) and `take_to_semi` track brace depth with an iterative counter, not recursion. The writer recurses only along the same fixed structure. |
 | T5 | **D**enial of service | Huge input exhausts memory | TB1, TB4 | Accepted risk **AR1**. `parse_named_conf_file` / `parse_zone_file_from_path` read the whole file with `read_to_string`; there is no size cap. |
 | T6 | **I**nformation disclosure / **E**levation | `include` or `$INCLUDE` makes hornet read files outside the intended tree (path traversal) | TB1, TB4 | **Not exposed.** hornet never follows includes: `include "path";` becomes `Statement::Include(path)` and `$INCLUDE` becomes `Entry::Include { file, .. }`; neither is opened. The CLI reads only the path given on its command line. Consumers that resolve includes themselves own that check. |
-| T7 | **T**ampering | `fmt` / `convert --in-place` silently destroys content | TB4 | The parser does not preserve comments, so an in-place rewrite removes them (open finding, section 6). Writes are a plain `std::fs::write` (non-atomic, follows symlinks); acceptable for a user-invoked CLI, see **AR2**. |
+| T7 | **T**ampering | `fmt` / `convert --in-place` silently destroys content | TB4 | **Controlled** (ADR-0003, F6 fixed). The AST still has no place for comments, so `fmt` and `convert --in-place` refuse to rewrite a file that contains any unless `--force` is given, and warn when they proceed; stdout modes warn that comments were omitted. The CLI reads each input exactly once, so the comment check and the parse see the same text. Writes are a plain `std::fs::write` (non-atomic, follows symlinks); acceptable for a user-invoked CLI, see **AR2**. |
 | T8 | **R**epudiation | A change to parser/writer behaviour lands without a record | TB5 | `.claude/CHANGELOG.md` entries with a mandatory `**Author:**`, signed and signed-off commits verified in CI (`verify-signed-commits`), ADRs for behaviour-changing decisions. |
 | T9 | **T**ampering | A compromised dependency or GitHub Action ships in a release | TB5 | Small dependency surface (`winnow`, `thiserror`, `miette`, optional `clap` / `serde`); `cargo audit` in CI; SPDX header check; Cosign-signed release tarballs, CycloneDX SBOMs and SLSA provenance; actions pinned by commit SHA and Dependabot-tracked (ADR-0001). Coverage tooling (ADR-0002) adds `cargo-llvm-cov` (installed by a SHA-pinned action) and a Codecov upload; neither affects what is built or released, and Codecov is a reporting sink, never a gate. |
 | T10 | **S**poofing | A forged hornet release or crate | TB5 | Cosign keyless signatures and SLSA provenance on GitHub release assets. crates.io publication relies on the `CARGO_REGISTRY_TOKEN` secret, scoped to the release job. |
@@ -102,16 +104,28 @@ flowchart LR
 
 ## 6. Findings
 
-Open findings from the 2026-10-05 pass are tracked privately until they are
-remediated, per the coordinated-disclosure policy in
-[`SECURITY.md`](https://github.com/firestoned/hornet/blob/main/SECURITY.md). Each moves here, with its fix and the test that pins it, once
-it lands. The STRIDE rows above that say "open finding" refer to these.
+All seven findings from the first pass (2026-10-05) were tracked privately
+under the coordinated-disclosure policy in
+[`SECURITY.md`](https://github.com/firestoned/hornet/blob/main/SECURITY.md)
+and fixed before 0.2.0, test-first, under
+[ADR-0003](https://github.com/firestoned/hornet/blob/main/docs/adr/0003-writer-escaping-contract-and-input-hardening.md).
+New findings follow the same path: private until fixed, then listed here.
+
+| ID | Finding | Severity | Fixed in | Fix |
+|---|---|---|---|---|
+| **F1** | `keyword()` lowercased the entire remaining input on every attempt: parse time grew with the square of the input size (16,000 zones took about a second), and keywords matched as prefixes (`zonex` matched `zone`) | Medium | 0.2.0 | Compare only the keyword-length prefix, case-insensitively, and require a word boundary. Pinned by a test that parse time does not depend on the remaining input. |
+| **F2** | The zone-file writer escaped `"` but not `\` in TXT strings: a value ending in a backslash closed the string early, and with an embedded newline the rest became new records (verified: an attacker-chosen `A` record) | High for programs that build zone ASTs from untrusted data | 0.2.0 | RFC 1035 character-string escaping for every string field (`\"`, `\\`, `\DDD` for control and non-ASCII bytes), matching decoding in the parser. `parse(write(x)) == x` is tested for adversarial strings, and BIND9 reads the payload as one TXT record. |
+| **F3** | Several writer paths interpolated AST strings unescaped: zone owner names and RDATA names, the `$INCLUDE` path, named.conf ACL references, key `algorithm`, and others | Medium (design gap) | 0.2.0 | Position-based quoting and escaping in both writers (ADR-0003, decision 1). Raw carriers stay verbatim and are documented as trusted-input only. |
+| **F4** | `quoted_string` ended at the first `"`, even after a backslash: `zone "a\"b"` fell through to `Statement::Unknown`, invisible to validation, while BIND9 reads a zone named `a"b` | Medium | 0.2.0 | End at the first unescaped `"`. |
+| **F5** | Capture of unmodelled options and statements stopped at the first `;` or `}` even inside quoted strings or comments, so hornet's view of later statements differed from BIND9's | Low | 0.2.0 | The scanner skips quoted strings and comments. |
+| **F6** | `fmt` and `convert --in-place` deleted every comment in the file they rewrote | Low (data loss) | 0.2.0 | Refuse unless `--force`; warn when proceeding (ADR-0003, decision 4). |
+| **F7** | Address-match literals matched as prefixes: an ACL named `anyone` or `nonexistent` matched `any` / `none`, the list failed, and the statement fell back to `Unknown` | Low | 0.2.0 | Whole-word matching; a quoted name is always an ACL reference. |
 
 ## 7. Accepted risks
 
 | ID | Risk | Why accepted | Revisit when |
 |---|---|---|---|
-| **AR1** | No input size limit; files are read fully into memory | hornet's inputs are config files, normally kilobytes to low megabytes. Callers that accept untrusted uploads can bound size before calling hornet. | Parse time is confirmed linear in input size, or hornet is embedded in a service that accepts uploads. |
+| **AR1** | No input size limit; files are read fully into memory | hornet's inputs are config files, normally kilobytes to low megabytes. Callers that accept untrusted uploads can bound size before calling hornet. | hornet is embedded in a service that accepts uploads. (Parse time is linear since F1 was fixed, so size now costs memory, not quadratic CPU.) |
 | **AR2** | `fmt` / `convert --in-place` use a non-atomic `std::fs::write` that follows symlinks | The CLI is user-invoked on the user's own files with the user's own permissions; it is not a privileged tool. | hornet's CLI is run by a privileged process or on paths an untrusted party controls. |
 | **AR3** | `named-checkconf` acceptance (ADR-0001) is necessary, not sufficient | The checkers validate syntax and much semantics but do not load a running server. | A defect reaches a release that `named-checkconf` accepted but `named` rejected at load. |
 
@@ -120,10 +134,13 @@ it lands. The STRIDE rows above that say "open finding" refer to these.
 - **License:** Apache-2.0, with SPDX headers enforced in CI.
 - **Dependencies:** `winnow`, `thiserror`, `miette`; optional `clap` (pinned to
   `=4.4.18`) and `serde`. `cargo audit` and `cargo deny`
-  run in CI. `Cargo.lock` is not committed today (see roadmap 01).
+  run in CI. `Cargo.lock` is committed and every build uses `--locked`, so CI
+  and release builds compile exactly the reviewed dependency graph.
 - **CI:** composite actions from `firestoned/github-actions`; third-party
   actions pinned by commit SHA and updated by Dependabot, with auto-merge gated
-  on the BIND9 e2e suite (ADR-0001, roadmap 01).
+  on the BIND9 e2e suite (ADR-0001, roadmap 01). Branch protection on `main`
+  requires a pull request, signed commits, and the `PR Checks Passed` and
+  `E2E gate` checks, for administrators too.
 - **Coverage reporting (ADR-0002):** coverage jobs upload LCOV to Codecov with
   the `CODECOV_TOKEN` repository secret. The workflows trigger on
   `pull_request`, not `pull_request_target`, so fork and Dependabot runs never

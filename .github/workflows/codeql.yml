@@ -145,7 +145,7 @@ jobs:
       # Build the Rust project
       # CodeQL analyzes the build process to understand the code
       - name: Build Rust project
-        run: cargo build --all-features --all-targets
+        run: make build-all
 
       # Perform CodeQL analysis
       - name: Perform CodeQL Analysis

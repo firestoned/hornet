@@ -14,6 +14,7 @@ Arguments:
 
 Options:
       --in-place  Write output back to the source file instead of stdout
+      --force     With --in-place, rewrite the file even though its comments will be removed
   -h, --help      Print help
 ```
 
@@ -50,6 +51,19 @@ Output:
 Converted /etc/bind/named.conf to modern keywords
 ```
 
+### Files with comments
+
+Hornet does not preserve comments. On a file with comments, `--in-place`
+refuses, exits `1` and leaves the file untouched:
+
+```
+error: /etc/bind/named.conf contains comments, which hornet does not preserve; rewriting it would delete them. Re-run with --force to rewrite anyway.
+```
+
+Add `--force` to rewrite it anyway (a warning confirms the comments were
+removed). Printing to stdout always works, with a warning on stderr that the
+output omits the comments.
+
 ### Migrate all configs
 
 ```sh
@@ -65,7 +79,7 @@ done
 | Code | Meaning |
 |---|---|
 | `0` | Conversion succeeded |
-| `1` | Parse error |
+| `1` | Parse error; or `--in-place` on a file with comments without `--force` |
 
 ---
 

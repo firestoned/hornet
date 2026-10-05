@@ -79,26 +79,70 @@ let opts = WriteOptions { modern_keywords: false, ..Default::default() };
 **Type:** `bool`
 **Default:** `false`
 
-When `true`, the DNS class (`IN`) is always emitted on `zone` and `view` statements,
-even when it matches the default.
+When `true`, every `zone` and `view` statement is written with a DNS class, even when the
+AST has none (`class: None`). The class filled in is the one BIND9 would assume:
+
+| Statement | Own class set | Class written |
+|---|---|---|
+| Top-level `zone` or `view` | no | `IN` |
+| `zone` inside a `view` | no | the view's class (`IN` if the view has none) |
+| Any `zone` or `view` | yes | its own class |
+
+A class the statement names itself always wins, with or without this option. When
+`false`, a class is written only when the AST holds one.
+
+Classes are written as `IN`, `CHAOS`, `HS` or `ANY`. The parser accepts `IN`, `CH` /
+`CHAOS`, `HS` / `HESIOD` and `ANY`.
 
 ```rust
 let opts = WriteOptions { explicit_class: true, ..Default::default() };
 ```
 
-**Example output with `explicit_class: true`:**
+**Input:**
 
 ```text
-zone "example.com" IN {
+view "chaos" CHAOS {
+    zone "version.bind" {
+        type primary;
+        file "version.db";
+    };
+};
+
+zone "example.com" {
     type primary;
+    file "example.com.db";
 };
 ```
 
-**Example output with `explicit_class: false` (default):**
+**Output with `explicit_class: true`:**
 
 ```text
+view "chaos" CHAOS {
+    zone "version.bind" CHAOS {
+        type primary;
+        file "version.db";
+    };
+};
+
+zone "example.com" IN {
+    type primary;
+    file "example.com.db";
+};
+```
+
+**Output with `explicit_class: false` (default):**
+
+```text
+view "chaos" CHAOS {
+    zone "version.bind" {
+        type primary;
+        file "version.db";
+    };
+};
+
 zone "example.com" {
     type primary;
+    file "example.com.db";
 };
 ```
 
@@ -155,6 +199,15 @@ let opts = WriteOptions {
 
 let output = write_named_conf(&conf, &opts);
 ```
+
+---
+
+## Escaping is not an option
+
+No `WriteOptions` field turns escaping off. Every modelled string is quoted or escaped
+according to its position, whatever the options; the raw carriers (`extra`,
+`Statement::Unknown`, `RData::Unknown`) are always written verbatim. See
+[Escaping and injection safety](../guide/writing.md#escaping-and-injection-safety).
 
 ---
 

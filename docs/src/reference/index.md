@@ -18,10 +18,12 @@ Detailed reference documentation for Hornet's constructs, types, and options.
 
 ```rust
 // Parse
-pub fn parse_named_conf(input: &str)            -> Result<NamedConf>
-pub fn parse_named_conf_file(path: &Path)       -> Result<NamedConf>
-pub fn parse_zone_file(input: &str)             -> Result<ZoneFile>
-pub fn parse_zone_file_from_path(path: &Path)   -> Result<ZoneFile>
+pub fn parse_named_conf(input: &str)                              -> Result<NamedConf>
+pub fn parse_named_conf_source(source_name: &str, input: &str)    -> Result<NamedConf>
+pub fn parse_named_conf_file(path: &Path)                         -> Result<NamedConf>
+pub fn parse_zone_file(input: &str)                               -> Result<ZoneFile>
+pub fn parse_zone_file_source(source_name: &str, input: &str)     -> Result<ZoneFile>
+pub fn parse_zone_file_from_path(path: &Path)                     -> Result<ZoneFile>
 
 // Write
 pub fn write_named_conf(conf: &NamedConf, opts: &WriteOptions) -> String
@@ -30,6 +32,14 @@ pub fn write_zone_file(zone: &ZoneFile, opts: &WriteOptions)   -> String
 // Validate
 pub fn validate_named_conf(conf: &NamedConf) -> Vec<ValidationError>
 pub fn validate_zone_file(zone: &ZoneFile)   -> Vec<ValidationError>
+
+// Zone-file escaping helpers (hornet_bind9::writer::zone_file)
+pub fn escape_char_string(s: &str) -> String
+pub fn escape_name(name: &Name)    -> String
+pub fn escape_token(s: &str)       -> String
+
+// Record types parsed into typed RData variants (hornet_bind9::ast::zone_file)
+pub const MODELLED_RTYPES: &[&str]
 
 // Re-exports
 pub use ast::{named_conf, zone_file};

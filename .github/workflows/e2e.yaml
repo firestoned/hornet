@@ -31,16 +31,11 @@
 name: E2E Tests
 
 on:
+  # Every pull request, unfiltered: `E2E gate` is a required status check, and
+  # a required check that a path filter skips never reports, which blocks the
+  # merge. The suite is a few minutes of BIND containers, cheap enough to run
+  # always.
   pull_request:
-    paths:
-      - '.github/workflows/e2e.yaml'
-      - 'Makefile'
-      - 'Cargo.toml'
-      - 'src/parser/**'
-      - 'src/writer/**'
-      - 'src/ast/**'
-      - 'src/main.rs'
-      - 'tests/e2e/**'
   workflow_call: {}
   workflow_dispatch: {}
 
@@ -183,8 +178,13 @@ jobs:
 
   # Single required check for branch protection and for callers of this
   # workflow: green only when every suite is green.
+  #
+  # Called from dependabot-auto-merge.yaml, this job runs under the caller's
+  # workflow name and gets a distinct check name. Otherwise both runs would be
+  # called "E2E gate", and the caller's copy, skipped on every human PR, would
+  # count as passing for the required check.
   e2e:
-    name: E2E gate
+    name: ${{ github.workflow == 'Dependabot Auto-merge' && 'Dependabot E2E gate' || 'E2E gate' }}
     needs: suite
     if: always()
     runs-on: ubuntu-latest

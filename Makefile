@@ -1,5 +1,10 @@
 .DEFAULT_GOAL := help
 
+# Cargo.lock is committed: every cargo invocation builds exactly the locked
+# dependency graph and fails if Cargo.toml and the lockfile disagree. Override
+# with CARGO_LOCKED= to let cargo update the lockfile.
+CARGO_LOCKED ?= --locked
+
 ##@ General
 
 .PHONY: help
@@ -10,20 +15,24 @@ help: ## Show this help
 
 .PHONY: build
 build: ## Build (debug) — library + CLI binary
-	cargo build
+	cargo build $(CARGO_LOCKED)
 
 .PHONY: build-release
 build-release: ## Build (release) — library + CLI binary
-	cargo build --release
+	cargo build $(CARGO_LOCKED) --release
 
 .PHONY: build-target
 build-target: ## Build the release CLI binary for TARGET (usage: make build-target TARGET=aarch64-apple-darwin)
 	@if [ -z "$(TARGET)" ]; then echo "Error: TARGET required"; exit 1; fi
-	cargo build --release --target $(TARGET)
+	cargo build $(CARGO_LOCKED) --release --target $(TARGET)
+
+.PHONY: build-all
+build-all: ## Build every target (lib, bin, tests, benches) with all features; used by CodeQL
+	cargo build $(CARGO_LOCKED) --all-features --all-targets
 
 .PHONY: build-lib
 build-lib: ## Build library only (no CLI binary)
-	cargo build --no-default-features
+	cargo build $(CARGO_LOCKED) --no-default-features
 
 ##@ Quality
 
@@ -37,16 +46,16 @@ fmt-check: ## Check formatting without modifying files
 
 .PHONY: clippy
 clippy: ## Run clippy with strict warnings
-	cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::module_name_repetitions -A clippy::assert_is_empty
+	cargo clippy $(CARGO_LOCKED) --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::module_name_repetitions -A clippy::assert_is_empty
 
 .PHONY: test
 test: ## Run all tests
-	cargo test --all-features
+	cargo test $(CARGO_LOCKED) --all-features
 
 .PHONY: test-release
 test-release: ## Run all tests in the release profile for TARGET (CI: reuses the release build's rlibs)
 	@if [ -z "$(TARGET)" ]; then echo "Error: TARGET required, e.g. TARGET=x86_64-unknown-linux-gnu"; exit 1; fi
-	cargo test --release --all-features --target $(TARGET)
+	cargo test $(CARGO_LOCKED) --release --all-features --target $(TARGET)
 
 .PHONY: quality
 quality: fmt clippy test ## Run fmt, clippy, and test (full quality gate)
@@ -55,7 +64,7 @@ quality: fmt clippy test ## Run fmt, clippy, and test (full quality gate)
 
 .PHONY: check
 check: ## Fast syntax/type check (no codegen)
-	cargo check --all-features
+	cargo check $(CARGO_LOCKED) --all-features
 
 .PHONY: clean
 clean: ## Remove build artifacts
@@ -63,25 +72,25 @@ clean: ## Remove build artifacts
 
 .PHONY: doc
 doc: ## Build rustdoc (opens browser)
-	cargo doc --no-deps --all-features --open
+	cargo doc $(CARGO_LOCKED) --no-deps --all-features --open
 
 ##@ Benchmarks
 
 .PHONY: bench
 bench: ## Run all benchmarks including stress tests (full criterion timing)
-	cargo bench --all-features
+	cargo bench $(CARGO_LOCKED) --all-features
 
 .PHONY: bench-quick
 bench-quick: ## Run standard benchmarks only, no stress tests (CI mode)
-	cargo bench --bench named_conf --bench zone_file
+	cargo bench $(CARGO_LOCKED) --bench named_conf --bench zone_file
 
 .PHONY: bench-stress
 bench-stress: ## Run stress benchmarks only — 10k and 100k zones (slow, not run in CI)
-	cargo bench --bench named_conf_stress
+	cargo bench $(CARGO_LOCKED) --bench named_conf_stress
 
 .PHONY: bench-compile
 bench-compile: ## Compile all benchmarks without running them (fast CI check)
-	cargo bench --no-run --all-features
+	cargo bench $(CARGO_LOCKED) --no-run --all-features
 
 ##@ Coverage
 
@@ -96,7 +105,7 @@ COVERAGE_MIN_FUNCTIONS ?= 100
 # otherwise count as missed lines.
 COVERAGE_IGNORE        ?= (_tests\.rs|/tests/|/benches/)
 LLVM_COV_IGNORE        := --ignore-filename-regex '$(COVERAGE_IGNORE)'
-LLVM_COV_FLAGS         := --all-features
+LLVM_COV_FLAGS         := --all-features $(CARGO_LOCKED)
 
 # coverage_report <suite>: write lcov, json and html for the profiles
 # collected so far into $(COVERAGE_DIR)/<suite>/.
@@ -253,7 +262,7 @@ license-report: ## Write a license report for every dependency to licenses.json
 
 .PHONY: publish
 publish: ## Publish the hornet crate to crates.io
-	cargo publish
+	cargo publish $(CARGO_LOCKED)
 
 ##@ Documentation
 

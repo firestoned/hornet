@@ -47,7 +47,7 @@ build() {
     mkdir -p "${dir}/bin"
     # A separate target dir keeps instrumented artefacts out of target/debug.
     RUSTFLAGS="-C instrument-coverage --cfg coverage" \
-        cargo build --bin hornet --all-features --target-dir "${target_dir}"
+        cargo build --locked --bin hornet --all-features --target-dir "${target_dir}"
     cp "${target_dir}/debug/hornet" "${dir}/bin/hornet"
     echo "instrumented hornet: ${dir}/bin/hornet"
 }

@@ -40,6 +40,9 @@ pub enum Statement {
     /// `server addr { … };`
     Server(ServerStmt),
     /// Any unrecognised top-level block, preserved verbatim.
+    ///
+    /// Raw carrier: written back verbatim. Trusted input only; untrusted text
+    /// here can inject arbitrary configuration.
     Unknown { keyword: String, raw: String },
 }
 
@@ -137,6 +140,9 @@ pub struct OptionsBlock {
     pub response_policy: Vec<ResponsePolicy>,
 
     /// Catch-all for options not explicitly modelled.
+    ///
+    /// Raw carrier: written back verbatim. Trusted input only; untrusted text
+    /// here can inject arbitrary configuration.
     pub extra: Vec<(String, String)>,
 }
 
@@ -258,6 +264,10 @@ pub struct ZoneOptions {
     pub key_directory: Option<String>,
     pub journal: Option<String>,
     pub max_journal_size: Option<SizeSpec>,
+    /// Options not explicitly modelled, as raw key/value pairs.
+    ///
+    /// Raw carrier: written back verbatim. Trusted input only; untrusted text
+    /// here can inject arbitrary configuration.
     pub extra: Vec<(String, String)>,
 }
 
@@ -356,6 +366,9 @@ pub struct ViewOptions {
     pub match_recursive_only: Option<bool>,
     pub zones: Vec<ZoneStmt>,
     /// View-level copies of global options, stored as raw key/value pairs.
+    ///
+    /// Raw carrier: written back verbatim. Trusted input only; untrusted text
+    /// here can inject arbitrary configuration.
     pub extra: Vec<(String, String)>,
 }
 
@@ -506,6 +519,10 @@ pub struct ServerOptions {
     pub send_cookie: Option<bool>,
     pub edns: Option<bool>,
     pub edns_version: Option<u8>,
+    /// Options not explicitly modelled, as raw key/value pairs.
+    ///
+    /// Raw carrier: written back verbatim. Trusted input only; untrusted text
+    /// here can inject arbitrary configuration.
     pub extra: Vec<(String, String)>,
 }
 

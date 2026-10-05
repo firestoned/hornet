@@ -15,9 +15,11 @@
 #     idempotent              `hornet parse` of hornet's output is unchanged
 #     bind-accepts-convert    named-checkconf accepts `hornet convert` output
 #     hornet-check-no-errors  `hornet check` reports no errors on the fixture
-#     fmt-matches-parse       `hornet fmt` in place writes what `parse` prints
+#     fmt-refuses-comments    `hornet fmt` without --force refuses a fixture
+#                             with comments and leaves it untouched
+#     fmt-matches-parse       `hornet fmt --force` in place writes what `parse` prints
 #     fmt-check-clean         `hornet fmt --check` passes on formatted output
-#     convert-in-place        `convert --in-place` writes what `convert` prints
+#     convert-in-place        `convert --in-place --force` writes what `convert` prints
 #
 #   zone fixtures (fixtures/zones/<origin>.zone)
 #     bind-accepts-original   named-checkzone accepts the fixture itself
@@ -114,6 +116,25 @@ record() {
     fi
 }
 
+# has_comments <file>: does the fixture contain a named.conf comment? A
+# deliberately simple line test: the fixtures keep comment markers out of
+# quoted strings.
+has_comments() {
+    grep -Eq '(^|[[:space:]])(#|//|/\*)' "$1"
+}
+
+# refuses_and_keeps <subcommand> <file>: the hornet subcommand must exit
+# non-zero and leave the file unchanged.
+refuses_and_keeps() {
+    local sub="$1" file="$2" before="${WORK}/refuse.before"
+    cp "${file}" "${before}"
+    if "${HORNET_BIN}" "${sub}" "${file}"; then
+        echo "hornet ${sub} rewrote a file with comments without --force"
+        return 1
+    fi
+    cmp -s "${before}" "${file}"
+}
+
 # check <fixture> <check> <command...>: run a command, record its status.
 check() {
     local fixture="$1" check_name="$2"
@@ -174,7 +195,8 @@ for src in "${WORK}"/in/named-conf/*.conf; do
     normalize_keywords "${canon_out}"
     diff_check "${name}" semantic-equivalent "${canon_in}" "${canon_out}"
 
-    "${HORNET_BIN}" parse "${parsed}" >"${reparsed}" 2>&1 || true
+    # stdout only: stderr carries advisories (e.g. the comments warning).
+    "${HORNET_BIN}" parse "${parsed}" >"${reparsed}" 2>"${WORK}/log" || true
     diff_check "${name}" idempotent "${parsed}" "${reparsed}"
 
     "${HORNET_BIN}" convert "${src}" >"${converted}" 2>"${WORK}/log" || true
@@ -185,18 +207,24 @@ for src in "${WORK}"/in/named-conf/*.conf; do
     check "${name}" hornet-check-no-errors \
         "${HORNET_BIN}" check --allow-warnings --min-severity error "${src}"
 
-    # `fmt` rewrites in place to exactly what `parse` prints, and `fmt --check`
-    # then reports the file as already formatted.
+    # Without --force, `fmt` refuses to rewrite a file that has comments (it
+    # would delete them, ADR-0003) and leaves it byte-for-byte untouched.
     fmt_copy="${WORK}/out/${name}.fmt"
     cp "${src}" "${fmt_copy}"
-    "${HORNET_BIN}" fmt "${fmt_copy}" >"${WORK}/log" 2>&1 || true
+    if has_comments "${src}"; then
+        check "${name}" fmt-refuses-comments refuses_and_keeps fmt "${fmt_copy}"
+    fi
+
+    # With --force, `fmt` rewrites in place to exactly what `parse` prints, and
+    # `fmt --check` then reports the file as already formatted.
+    "${HORNET_BIN}" fmt --force "${fmt_copy}" >"${WORK}/log" 2>&1 || true
     diff_check "${name}" fmt-matches-parse "${parsed}" "${fmt_copy}"
     check "${name}" fmt-check-clean "${HORNET_BIN}" fmt --check "${fmt_copy}"
 
     # `convert --in-place` writes exactly what `convert` prints.
     conv_copy="${WORK}/out/${name}.convert-in-place"
     cp "${src}" "${conv_copy}"
-    "${HORNET_BIN}" convert --in-place "${conv_copy}" >"${WORK}/log" 2>&1 || true
+    "${HORNET_BIN}" convert --in-place --force "${conv_copy}" >"${WORK}/log" 2>&1 || true
     diff_check "${name}" convert-in-place "${converted}" "${conv_copy}"
 done
 
@@ -226,7 +254,8 @@ for src in "${WORK}"/in/zones/*.zone; do
     bind_tool named-compilezone -q -o - "${origin}" "out/${name}.zone-out" >"${canon_out}" 2>&1 || true
     diff_check "${name}" semantic-equivalent "${canon_in}" "${canon_out}"
 
-    "${HORNET_BIN}" zone "${written}" >"${rewritten}" 2>&1 || true
+    # stdout only: stderr carries advisories (e.g. the comments warning).
+    "${HORNET_BIN}" zone "${written}" >"${rewritten}" 2>"${WORK}/log" || true
     diff_check "${name}" idempotent "${written}" "${rewritten}"
 
     # hornet's zone validator raises no errors on a zone BIND9 accepts.

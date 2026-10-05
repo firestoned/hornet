@@ -5,6 +5,7 @@
 //! writing that AST again must yield the same text, for every `WriteOptions`
 //! combination.
 
+use hornet_bind9::named_conf::{DnsClass, NamedConf, Statement};
 use hornet_bind9::writer::WriteOptions;
 use hornet_bind9::{parse_named_conf, write_named_conf};
 
@@ -146,6 +147,27 @@ fn option_matrix() -> Vec<WriteOptions> {
     all
 }
 
+/// What `explicit_class` adds to an AST: every class-less zone and view gets the
+/// class BIND9 would give it (IN at the top level, the view's class inside a view).
+fn with_explicit_classes(conf: &NamedConf) -> NamedConf {
+    let mut conf = conf.clone();
+    for stmt in &mut conf.statements {
+        match stmt {
+            Statement::Zone(z) => {
+                z.class.get_or_insert(DnsClass::In);
+            }
+            Statement::View(v) => {
+                let class = v.class.get_or_insert(DnsClass::In).clone();
+                for z in &mut v.options.zones {
+                    z.class.get_or_insert_with(|| class.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    conf
+}
+
 #[test]
 fn every_fixture_round_trips_under_every_write_option() {
     for (label, text) in ALL_CONFS {
@@ -155,9 +177,63 @@ fn every_fixture_round_trips_under_every_write_option() {
             let written = write_named_conf(&original, &opts);
             let reparsed = parse_named_conf(&written)
                 .unwrap_or_else(|e| panic!("{label} {opts:?}: output failed to parse: {e:?}"));
-            assert_eq!(reparsed, original, "{label} {opts:?}: AST changed");
+            let expected = if opts.explicit_class {
+                with_explicit_classes(&original)
+            } else {
+                original.clone()
+            };
+            assert_eq!(reparsed, expected, "{label} {opts:?}: AST changed");
         }
     }
+}
+
+#[test]
+fn explicit_class_gives_zones_in_a_chaos_view_the_view_class() {
+    let text = r#"view "chaos" CHAOS { zone "bind" { type primary; file "bind.db"; }; };
+zone "example.com" { type primary; file "db"; };"#;
+    let conf = parse_named_conf(text).unwrap();
+    let opts = WriteOptions {
+        explicit_class: true,
+        ..WriteOptions::default()
+    };
+    let out = write_named_conf(&conf, &opts);
+    assert!(out.contains("zone \"bind\" CHAOS {"), "{out}");
+    assert!(out.contains("zone \"example.com\" IN {"), "{out}");
+    assert_eq!(
+        parse_named_conf(&out).unwrap(),
+        with_explicit_classes(&conf)
+    );
+}
+
+#[test]
+fn empty_address_match_list_round_trips() {
+    let text = "options { allow-query { }; allow-transfer { none; }; };";
+    let conf = parse_named_conf(text).unwrap();
+    let out = write_named_conf(&conf, &WriteOptions::default());
+    assert!(out.contains("allow-query { };"), "{out}");
+    assert!(!out.contains("{ ; }"), "{out}");
+    assert_eq!(parse_named_conf(&out).unwrap(), conf);
+}
+
+#[test]
+fn zone_journal_and_server_flags_round_trip() {
+    let text = r#"zone "example.com" { type primary; file "db"; journal "db.jnl"; };
+server 192.0.2.9 { edns no; request-nsid yes; };"#;
+    let conf = parse_named_conf(text).unwrap();
+    let out = write_named_conf(&conf, &WriteOptions::default());
+    assert!(out.contains("journal \"db.jnl\";"), "{out}");
+    assert!(out.contains("edns no;"), "{out}");
+    assert!(out.contains("request-nsid yes;"), "{out}");
+    assert_eq!(parse_named_conf(&out).unwrap(), conf);
+}
+
+#[test]
+fn quoted_key_algorithm_round_trips() {
+    let text = r#"key "k" { algorithm "not a bareword"; secret "c2VjcmV0"; };"#;
+    let conf = parse_named_conf(text).unwrap();
+    let out = write_named_conf(&conf, &WriteOptions::default());
+    assert!(out.contains("algorithm \"not a bareword\";"), "{out}");
+    assert_eq!(parse_named_conf(&out).unwrap(), conf);
 }
 
 #[test]

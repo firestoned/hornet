@@ -4,6 +4,35 @@ Internal development log. For the public release changelog see `docs/src/referen
 
 Each entry documents what changed, who requested it, and why — required for auditability.
 
+## [2026-10-05 23:00] - 0.2.0 hardening: threat-model findings F1 to F7, grammar gaps, CI lock-down
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/parser/common.rs`, `src/parser/named_conf.rs`: F1 whole-word, prefix-only keyword matching (linear parse time); F4 `\"` in quoted strings; F5 quote/comment-aware raw capture; F7 whole-word address-match literals; quoted ACL references; classes CH/HS/ANY; `unix` controls; `in-view`; `delegation-only`; typed-or-verbatim parsing of every field the writer emits; never-failing helpers made infallible
+- `src/writer/named_conf.rs`: F3 position-based quoting/escaping; `explicit_class`; `{ }` for empty lists; every modelled field written; `unix` controls; raw carriers documented as trusted-only
+- `src/parser/zone_file.rs`, `src/writer/zone_file.rs`, `src/ast/zone_file.rs`: F2/F3 RFC 1035 escaping and decoding; typed LOC/RRSIG/NSEC3/NSEC3PARAM; zone-only `;` comments; nothing dropped silently (malformed RDATA kept verbatim, unparseable lines are errors with line numbers); `MODELLED_RTYPES`
+- `src/validator/mod.rs`: warning for records of a modelled type kept verbatim
+- `src/lib.rs`: `parse_named_conf_source`, `parse_zone_file_source`
+- `src/main.rs`, `src/comments.rs` (new): F6 comment refusal (`--force`), stderr warnings; each input read once; label constants
+- Tests: about 220 new across unit, integration and CLI; 863 total; 100% lines, functions and regions
+- `tests/e2e/run.sh`: stdout-only idempotence; `--force` for in-place checks; new `fmt-refuses-comments` check (60/60 on BIND 9.18 and 9.20)
+- `.gitignore`, `Cargo.lock`, `Makefile`, `scripts/coverage-e2e.sh`: lockfile committed; `CARGO_LOCKED ?= --locked` on every cargo invocation; `build-all` target
+- `.github/workflows/e2e.yaml`: runs on every PR (required check); Dependabot-called copy of the gate gets a distinct check name; `.github/workflows/codeql.yml`: `make build-all`
+- GitHub settings (applied with `gh api`, not in the repo): branch protection on `main` (PR required, signed commits, `PR Checks Passed` + `E2E gate`, admins enforced, no force push/delete); allow auto-merge; delete branch on merge
+- Docs: ADR-0003 (new); threat model v1.2 (F1 to F7 published as fixed); roadmaps 01 and 02 complete, roadmap 03 (new); `docs/src/reference/changelog.md` 0.2.0; version references 0.2; user guides and references for the new behaviour
+
+### Why
+Close every open threat-model finding and the known writer/parser gaps before tagging 0.2.0, and make CI and `main` enforce what this release relies on.
+
+### Impact
+- [x] Breaking change (`parse_zone_file` can return `Err`; zone `#`/`//` are data; CLI refuses commented files without `--force`)
+- [x] New feature
+- [x] Bug fix
+- [ ] Documentation only
+
+---
+
 ## [2026-10-05 18:00] - 100% line/function coverage, per-suite coverage reports, 12 bug fixes
 
 **Author:** Erick Bourgeois

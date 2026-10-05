@@ -1,6 +1,12 @@
 # named.conf Constructs Reference
 
-Complete field reference for all `named.conf` statement types supported by Hornet.
+Complete field reference for all `named.conf` statement types supported by Hornet. The
+types live in `hornet_bind9::ast::named_conf`.
+
+Unless noted otherwise, every field below is read by the parser and written back by the
+writer. Fields marked
+**raw carrier** are written verbatim and must only hold trusted text; see
+[Raw carriers hold trusted text only](../guide/writing.md#raw-carriers-hold-trusted-text-only).
 
 ---
 
@@ -25,10 +31,17 @@ The top-level AST type.
 | `Statement::Logging(…)` | `LoggingBlock` | Logging configuration |
 | `Statement::Controls(…)` | `ControlsBlock` | RNDC control channels |
 | `Statement::Key(…)` | `KeyStmt` | TSIG key |
-| `Statement::Primaries(…)` | `PrimariesStmt` | Named list of primary servers |
+| `Statement::Primaries(…)` | `PrimariesStmt` | Named list of primary servers (`primaries` or `masters`) |
 | `Statement::Server(…)` | `ServerStmt` | Per-server options |
 | `Statement::Include(…)` | `String` | `include "path";` |
-| `Statement::Unknown { keyword, body }` | — | Unrecognised block, preserved verbatim |
+| `Statement::Unknown { keyword, raw }` | | Unrecognised statement, preserved verbatim (**raw carrier**) |
+
+---
+
+## `DnsClass` enum
+
+`In`, `Chaos`, `Hs`, `Any`. The parser accepts `IN`, `CH` / `CHAOS`, `HS` / `HESIOD` and
+`ANY`; the writer prints `IN`, `CHAOS`, `HS` and `ANY`.
 
 ---
 
@@ -36,47 +49,92 @@ The top-level AST type.
 
 Global server configuration (`options { … };`).
 
+| Field | Type | `named.conf` option |
+|---|---|---|
+| `directory` | `Option<String>` | `directory` |
+| `dump_file` | `Option<String>` | `dump-file` |
+| `statistics_file` | `Option<String>` | `statistics-file` |
+| `memstatistics_file` | `Option<String>` | `memstatistics-file` |
+| `pid_file` | `Option<String>` | `pid-file` |
+| `session_keyfile` | `Option<String>` | `session-keyfile` |
+| `listen_on` | `Vec<ListenOn>` | `listen-on [port N] { … }` |
+| `listen_on_v6` | `Vec<ListenOn>` | `listen-on-v6 [port N] { … }` |
+| `forwarders` | `Vec<IpAddr>` | `forwarders { … }` |
+| `forward` | `Option<ForwardPolicy>` | `forward only` / `forward first` |
+| `allow_query` | `Option<AddressMatchList>` | `allow-query` |
+| `allow_query_cache` | `Option<AddressMatchList>` | `allow-query-cache` |
+| `allow_recursion` | `Option<AddressMatchList>` | `allow-recursion` |
+| `allow_transfer` | `Option<AddressMatchList>` | `allow-transfer` |
+| `allow_update` | `Option<AddressMatchList>` | `allow-update` |
+| `blackhole` | `Option<AddressMatchList>` | `blackhole` |
+| `recursion` | `Option<bool>` | `recursion` |
+| `notify` | `Option<NotifyOption>` | `notify` (`yes`, `no`, `explicit`, `master-only`) |
+| `dnssec_enable` | `Option<bool>` | `dnssec-enable` (written only; see note) |
+| `dnssec_validation` | `Option<DnssecValidation>` | `dnssec-validation` (`yes`, `no`, `auto`) |
+| `max_cache_size` | `Option<SizeSpec>` | `max-cache-size` |
+| `max_cache_ttl` | `Option<u32>` | `max-cache-ttl` |
+| `min_cache_ttl` | `Option<u32>` | `min-cache-ttl` |
+| `version` | `Option<String>` | `version` |
+| `hostname` | `Option<String>` | `hostname` |
+| `server_id` | `Option<String>` | `server-id` |
+| `rate_limit` | `Option<RateLimit>` | `rate-limit { … }` |
+| `response_policy` | `Vec<ResponsePolicy>` | `response-policy { zone "…" [policy …]; … }` |
+| `extra` | `Vec<(String, String)>` | Any other option (**raw carrier**) |
+
+!!! note "`dnssec-enable`"
+    `dnssec-enable` is obsolete in current BIND9 releases. The writer emits `dnssec_enable`
+    when it is set, but the parser does not fill it: a `dnssec-enable` line in a file is
+    kept in `extra`.
+
+### `RateLimit`
+
+`responses_per_second`, `referrals_per_second`, `nodata_per_second`,
+`nxdomains_per_second`, `errors_per_second`, `all_per_second`, `window`, `slip`
+(all `Option<u32>`), and `log_only` (`Option<bool>`).
+
+### `ResponsePolicy`
+
 | Field | Type | Description |
 |---|---|---|
-| `directory` | `Option<String>` | Working directory for BIND9 |
-| `dump_file` | `Option<String>` | Path for `rndc dumpdb` output |
-| `statistics_file` | `Option<String>` | Statistics file path |
-| `pid_file` | `Option<String>` | PID file path |
-| `recursion` | `Option<bool>` | Enable recursive queries |
-| `allow_query` | `Option<AddressMatchList>` | Who may query this server |
-| `allow_recursion` | `Option<AddressMatchList>` | Who may use recursion |
-| `allow_transfer` | `Option<AddressMatchList>` | Who may receive zone transfers |
-| `blackhole` | `Option<AddressMatchList>` | Addresses to silently ignore |
-| `forwarders` | `Vec<IpAddr>` | Upstream forwarder addresses |
-| `forward` | `Option<ForwardPolicy>` | `first` or `only` |
-| `listen_on` | `Vec<AddressMatchElement>` | IPv4 listen addresses |
-| `listen_on_v6` | `Vec<AddressMatchElement>` | IPv6 listen addresses |
-| `dnssec_validation` | `Option<DnssecValidation>` | `yes`, `no`, or `auto` |
-| `zones` | `Vec<ZoneStmt>` | Inline zone declarations |
+| `zone` | `String` | RPZ zone name |
+| `policy` | `Option<String>` | Policy override, such as `nxdomain` or `cname example.com.` |
 
 ---
 
 ## `ZoneStmt`
 
-A zone declaration (`zone "name" { … };`).
+A zone declaration (`zone "name" [class] { … };`).
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | `String` | Zone name (e.g. `"example.com"`) |
-| `class` | `Option<DnsClass>` | DNS class (default `IN`) |
+| `class` | `Option<DnsClass>` | DNS class; `None` means BIND9's default (see [`explicit_class`](./write-options.md#explicit_class)) |
 | `options` | `ZoneOptions` | Zone-specific options |
 
 ### `ZoneOptions`
 
-| Field | Type | Description |
+| Field | Type | `named.conf` option |
 |---|---|---|
-| `zone_type` | `Option<ZoneType>` | `Primary`, `Secondary`, `Stub`, `Forward`, `Hint`, etc. |
-| `file` | `Option<String>` | Path to the zone file |
-| `primaries` | `Option<String>` | Named primaries list reference |
-| `forwarders` | `Vec<IpAddr>` | Forwarder addresses (for forward zones) |
-| `allow_query` | `Option<AddressMatchList>` | Per-zone query ACL |
-| `allow_transfer` | `Option<AddressMatchList>` | Per-zone transfer ACL |
-| `also_notify` | `Vec<IpAddr>` | Additional NOTIFY recipients |
+| `zone_type` | `Option<ZoneType>` | `type …`, or `in-view "view";` |
+| `file` | `Option<String>` | `file` |
+| `masters` / `primaries` | `Option<AddressMatchList>` | `masters { … }` / `primaries { … }` |
+| `allow_query` | `Option<AddressMatchList>` | `allow-query` |
+| `allow_transfer` | `Option<AddressMatchList>` | `allow-transfer` |
+| `allow_update` | `Option<AddressMatchList>` | `allow-update` |
+| `update_policy` | `Option<UpdatePolicy>` | `update-policy { grant … ; deny … ; }` |
+| `also_notify` | `Option<AddressMatchList>` | `also-notify` |
+| `notify` | `Option<NotifyOption>` | `notify` |
+| `notify_source` | `Option<IpAddr>` | `notify-source` (IPv4) / `notify-source-v6` (IPv6) |
+| `forward` | `Option<ForwardPolicy>` | `forward` |
+| `forwarders` | `Vec<IpAddr>` | `forwarders { … }` |
+| `check_names` | `Option<CheckNames>` | `check-names` (`fail`, `warn`, `ignore`) |
+| `auto_dnssec` | `Option<AutoDnssec>` | `auto-dnssec` (`allow`, `maintain`, `off`); removed in BIND 9.20 |
+| `inline_signing` | `Option<bool>` | `inline-signing` |
+| `dnssec_policy` | `Option<String>` | `dnssec-policy` |
+| `key_directory` | `Option<String>` | `key-directory` |
+| `journal` | `Option<String>` | `journal` |
+| `max_journal_size` | `Option<SizeSpec>` | `max-journal-size` |
+| `extra` | `Vec<(String, String)>` | Any other option (**raw carrier**) |
 
 ### `ZoneType` enum
 
@@ -85,22 +143,30 @@ A zone declaration (`zone "name" { … };`).
 | `Primary` | `primary`, `master` |
 | `Secondary` | `secondary`, `slave` |
 | `Stub` | `stub` |
+| `Static` | `static-stub` |
 | `Forward` | `forward` |
 | `Hint` | `hint` |
 | `Redirect` | `redirect` |
-| `Delegation` | `delegation-only` |
-| `InView` | `in-view` |
+| `Delegation` | `delegation-only` (removed in BIND 9.20) |
+| `InView(String)` | the `in-view "view";` zone option |
+
+### `UpdatePolicy`
+
+`UpdatePolicy { rules: Vec<UpdatePolicyRule> }`, where each rule is
+`{ action: Grant | Deny, identity: String, name_type: String, name: Option<String>, types: Vec<String> }`.
+The identity is always quoted on output; the name type and record types are written bare
+when they are plain names and quoted otherwise.
 
 ---
 
 ## `ViewStmt`
 
-A view block (`view "name" { … };`).
+A view block (`view "name" [class] { … };`).
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | `String` | View name |
-| `class` | `Option<DnsClass>` | DNS class (default `IN`) |
+| `class` | `Option<DnsClass>` | DNS class (`None` means `IN`) |
 | `options` | `ViewOptions` | View-level options |
 
 ### `ViewOptions`
@@ -109,9 +175,9 @@ A view block (`view "name" { … };`).
 |---|---|---|
 | `match_clients` | `Option<AddressMatchList>` | Clients served by this view |
 | `match_destinations` | `Option<AddressMatchList>` | Destination addresses for this view |
-| `recursion` | `Option<bool>` | Override recursion for this view |
-| `allow_query` | `Option<AddressMatchList>` | View-level query ACL |
+| `match_recursive_only` | `Option<bool>` | Only match recursive queries |
 | `zones` | `Vec<ZoneStmt>` | Zones inside this view |
+| `extra` | `Vec<(String, String)>` | Any other option (**raw carrier**) |
 
 ---
 
@@ -122,23 +188,30 @@ A named address match list (`acl "name" { … };`).
 | Field | Type | Description |
 |---|---|---|
 | `name` | `String` | ACL name |
-| `elements` | `Vec<AddressMatchElement>` | List members |
+| `addresses` | `AddressMatchList` | List members |
 
 ---
 
 ## `AddressMatchElement` enum
 
+`AddressMatchList` is `Vec<AddressMatchElement>`. An empty list is written as `{ }`.
+
 | Variant | Description |
 |---|---|
-| `Any` | The built-in `any` |
-| `None` | The built-in `none` |
-| `Localhost` | The built-in `localhost` |
-| `Localnets` | The built-in `localnets` |
-| `IpAddr(IpAddr)` | A single IP address |
+| `Any` | The built-in `any` (bare word only) |
+| `None` | The built-in `none` (bare word only) |
+| `Localhost` | The built-in `localhost` (bare word only) |
+| `Localnets` | The built-in `localnets` (bare word only) |
+| `Ip(IpAddr)` | A single IP address |
 | `Cidr { addr, prefix_len }` | An IP/prefix CIDR block |
 | `AclRef(String)` | Reference to a named ACL |
-| `KeyRef(String)` | Reference to a named key |
-| `Negated(Box<AddressMatchElement>)` | Logical NOT of an element |
+| `Key(String)` | `key "name"` |
+| `Negated(Box<AddressMatchElement>)` | `!element` |
+
+The parser matches the built-ins only as whole, unquoted words: `anyone` and `"any"` are
+both `AclRef`. The writer writes an `AclRef` bare only when it is a plain name (an ASCII
+letter, then letters, digits, `-`, `_`, `.`) and not one of `any`, `none`, `localhost`,
+`localnets` or `key`; otherwise it is quoted, so it reads back as the same reference.
 
 ---
 
@@ -148,9 +221,9 @@ A TSIG key (`key "name" { … };`).
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | `String` | Key name |
-| `algorithm` | `String` | HMAC algorithm (e.g. `hmac-sha256`) |
-| `secret` | `String` | Base64-encoded key material |
+| `name` | `String` | Key name (always quoted on output) |
+| `algorithm` | `String` | HMAC algorithm (e.g. `hmac-sha256`); bare when a plain name, quoted otherwise |
+| `secret` | `String` | Base64-encoded key material (always quoted) |
 
 ---
 
@@ -161,29 +234,56 @@ Logging configuration (`logging { … };`).
 | Field | Type | Description |
 |---|---|---|
 | `channels` | `Vec<LogChannel>` | Log channel definitions |
-| `categories` | `Vec<LogCategory>` | Category-to-channel bindings |
+| `categories` | `Vec<LogCategory>` | Category-to-channel bindings (`name`, `channels`) |
 
 ### `LogChannel`
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | `String` | Channel name |
-| `destination` | `LogDestination` | `File { path, versions, size }`, `Syslog`, `Stderr`, `Null` |
-| `severity` | `Option<String>` | Log severity filter |
+| `destination` | `LogDestination` | `File { path, versions, size }`, `Syslog(Option<SyslogFacility>)`, `Stderr`, `Null` |
+| `severity` | `Option<LogSeverity>` | `critical`, `error`, `warning`, `notice`, `info`, `debug [N]`, `dynamic` |
 | `print_time` | `Option<bool>` | Include timestamps |
 | `print_severity` | `Option<bool>` | Include severity labels |
 | `print_category` | `Option<bool>` | Include category names |
+| `buffered` | `Option<bool>` | Buffer output |
+
+---
+
+## `ControlsBlock`
+
+RNDC control channels (`controls { … };`).
+
+| Field | Type | Description |
+|---|---|---|
+| `inet` | `Vec<InetControl>` | `inet addr port N allow { … } [keys { … }] [read-only yes-or-no];` |
+| `unix` | `Vec<UnixControl>` | `unix "path" perm N owner N group N [keys { … }] [read-only yes-or-no];` |
+
+`InetControl` has `address`, `port`, `allow`, `keys` and `read_only`. `UnixControl` has
+`path`, `perm`, `owner`, `group` (`Option<u32>`), `keys` and `read_only`. The parser reads
+`perm`, `owner` and `group` as C numbers (`0600` octal, `0x180` hex, or decimal); the
+writer prints decimal. `unix` channels were removed in BIND 9.20.
 
 ---
 
 ## `PrimariesStmt`
 
-A named list of primary servers (`primaries "name" { … };`).
+A named list of primary servers (`primaries "name" { … };` or `masters`).
 
 | Field | Type | Description |
 |---|---|---|
 | `name` | `String` | List name |
-| `entries` | `Vec<PrimaryEntry>` | Server entries (address + optional key) |
+| `servers` | `Vec<RemoteServer>` | Server entries |
+
+### `RemoteServer`
+
+| Field | Type | Description |
+|---|---|---|
+| `address` | `IpAddr` | Server address |
+| `port` | `Option<u16>` | `port N` |
+| `dscp` | `Option<u8>` | Not parsed and not written: BIND9 rejects a per-server `dscp` here and removed DSCP in 9.20 |
+| `key` | `Option<String>` | `key "name"` |
+| `tls` | `Option<String>` | `tls "name"` |
 
 ---
 
@@ -194,12 +294,31 @@ Per-server options (`server <addr> { … };`).
 | Field | Type | Description |
 |---|---|---|
 | `address` | `IpAddr` | Server IP address |
-| `keys` | `Vec<String>` | TSIG key names for this server |
-| `transfers` | `Option<u32>` | Concurrent transfer limit |
+| `options` | `ServerOptions` | Server options |
+
+### `ServerOptions`
+
+| Field | Type | `named.conf` option |
+|---|---|---|
+| `bogus` | `Option<bool>` | `bogus` |
+| `transfers` | `Option<u32>` | `transfers` |
+| `transfer_format` | `Option<TransferFormat>` | `transfer-format` (`one-answer`, `many-answers`) |
+| `transfer_source` | `Option<IpAddr>` | `transfer-source` / `transfer-source-v6` |
+| `keys` | `Vec<String>` | `keys { … }` |
+| `notify_source` | `Option<IpAddr>` | `notify-source` / `notify-source-v6` |
+| `query_source` | `Option<IpAddr>` | `query-source [address] addr` / `query-source-v6`; other forms go to `extra` |
+| `request_nsid` | `Option<bool>` | `request-nsid` |
+| `send_cookie` | `Option<bool>` | `send-cookie` |
+| `edns` | `Option<bool>` | `edns` |
+| `edns_version` | `Option<u8>` | `edns-version` |
+| `extra` | `Vec<(String, String)>` | Any other option (**raw carrier**) |
+
+For the `*-source` options, the writer picks the `-v6` spelling from the stored address's
+family.
 
 ---
 
 ## Next Steps
 
-- [Zone Record Types](./zone-record-types.md) — Zone file record field reference
-- [named.conf Concepts](../concepts/named-conf.md) — Overview with examples
+- [Zone Record Types](./zone-record-types.md): Zone file record field reference
+- [named.conf Concepts](../concepts/named-conf.md): Overview with examples

@@ -73,6 +73,26 @@ pub fn parse_named_conf(input: &str) -> Result<ast::named_conf::NamedConf> {
     parse_with(parser::parse_named_conf, INPUT_SOURCE_NAME, input)
 }
 
+/// Parse `named.conf` text that has already been read, naming its source.
+///
+/// Use this when the text did not come straight from a file hornet reads (a
+/// Kubernetes `ConfigMap`, an HTTP body, a file already in memory): diagnostics
+/// name `source_name` instead of the generic `<input>`.
+///
+/// # Arguments
+/// * `source_name` - Name shown in diagnostics, usually a path
+/// * `input` - The configuration text
+///
+/// # Errors
+/// Returns [`Error::Parse`] if the input is not valid BIND9 configuration.
+#[allow(clippy::result_large_err)]
+pub fn parse_named_conf_source(
+    source_name: &str,
+    input: &str,
+) -> Result<ast::named_conf::NamedConf> {
+    parse_with(parser::parse_named_conf, source_name, input)
+}
+
 /// Parse a `named.conf` file from disk.
 ///
 /// # Errors
@@ -80,11 +100,7 @@ pub fn parse_named_conf(input: &str) -> Result<ast::named_conf::NamedConf> {
 #[allow(clippy::result_large_err)]
 pub fn parse_named_conf_file(path: &std::path::Path) -> Result<ast::named_conf::NamedConf> {
     let input = std::fs::read_to_string(path)?;
-    parse_with(
-        parser::parse_named_conf,
-        &path.display().to_string(),
-        &input,
-    )
+    parse_named_conf_source(&path.display().to_string(), &input)
 }
 
 /// Parse a DNS zone file string into an AST.
@@ -96,6 +112,21 @@ pub fn parse_zone_file(input: &str) -> Result<ast::zone_file::ZoneFile> {
     parse_with(parser::parse_zone_file, INPUT_SOURCE_NAME, input)
 }
 
+/// Parse zone-file text that has already been read, naming its source.
+///
+/// The zone-file counterpart of [`parse_named_conf_source`].
+///
+/// # Arguments
+/// * `source_name` - Name shown in diagnostics, usually a path
+/// * `input` - The zone-file text
+///
+/// # Errors
+/// Returns [`Error::Parse`] if the input is not a valid zone file.
+#[allow(clippy::result_large_err)]
+pub fn parse_zone_file_source(source_name: &str, input: &str) -> Result<ast::zone_file::ZoneFile> {
+    parse_with(parser::parse_zone_file, source_name, input)
+}
+
 /// Parse a zone file from disk.
 ///
 /// # Errors
@@ -103,16 +134,16 @@ pub fn parse_zone_file(input: &str) -> Result<ast::zone_file::ZoneFile> {
 #[allow(clippy::result_large_err)]
 pub fn parse_zone_file_from_path(path: &std::path::Path) -> Result<ast::zone_file::ZoneFile> {
     let input = std::fs::read_to_string(path)?;
-    parse_with(parser::parse_zone_file, &path.display().to_string(), &input)
+    parse_zone_file_source(&path.display().to_string(), &input)
 }
 
-/// Serialise a [`NamedConf`] AST back to a `String`.
+/// Serialise a [`NamedConf`](ast::named_conf::NamedConf) AST back to a `String`.
 #[must_use]
 pub fn write_named_conf(conf: &ast::named_conf::NamedConf, opts: &writer::WriteOptions) -> String {
     writer::write_named_conf(conf, opts)
 }
 
-/// Serialise a [`ZoneFile`] AST back to a `String`.
+/// Serialise a [`ZoneFile`](ast::zone_file::ZoneFile) AST back to a `String`.
 #[must_use]
 pub fn write_zone_file(zone: &ast::zone_file::ZoneFile, opts: &writer::WriteOptions) -> String {
     writer::write_zone_file(zone, opts)

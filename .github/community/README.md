@@ -32,6 +32,12 @@ takes the number at the end of its section and everything after it shifts up.
 | 01 | [`01-ci-and-supply-chain.md`](01-ci-and-supply-chain.md) | One event-gated `build.yaml`, `e2e.yaml` against real BIND9, SHA-pinned actions, gated Dependabot auto-merge |
 | 02 | [`02-test-coverage.md`](02-test-coverage.md) | 100% line and function coverage gate; per-suite coverage reports in every workflow |
 
+### Grammar fidelity
+
+| # | File | What |
+|---|---|---|
+| 03 | [`03-grammar-fidelity-follow-ups.md`](03-grammar-fidelity-follow-ups.md) | AST and grammar gaps found while hardening 0.2.0 (inet without port, forwarders, classes, case, BIND 9.20 removals) |
+
 ## Privately tracked roadmaps
 
 Some in-flight security hardening work is tracked privately until it lands, so

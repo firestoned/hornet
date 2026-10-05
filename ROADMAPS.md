@@ -21,7 +21,7 @@ A roadmap entry describes *what* and *why*; it does not skip the ADR for *how*.
 
 ## Index
 
-Statuses were verified against `main` @ `10fee80` on 2026-10-05.
+Statuses were verified against the 0.2.0 release tree on 2026-10-05.
 
 ### Features
 
@@ -33,8 +33,14 @@ Statuses were verified against `main` @ `10fee80` on 2026-10-05.
 
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
-| [01](.github/community/01-ci-and-supply-chain.md) | CI consolidation and supply chain | 🔶 | [ADR-0001](docs/adr/0001-single-build-workflow-and-bind9-e2e-oracle.md). Landed 2026-10-05: one event-gated `build.yaml` (old `pr.yml` / `main.yaml` / `release.yml` deleted), reusable `e2e.yaml` against real BIND 9.18 / 9.20, every action SHA-pinned, e2e-gated Dependabot auto-merge, CodeQL, Scorecard, license scan. The three bugs the e2e caught are fixed (via 02); e2e 56/56 on both versions. Open: branch protection, commit `Cargo.lock` |
-| [02](.github/community/02-test-coverage.md) | Test coverage | 🔶 | [ADR-0002](docs/adr/0002-coverage-policy-and-per-suite-reports.md). Per-suite reports (unit, integration, e2e) in each workflow's job summary, HTML artifacts and Codecov flags. Gate reached 2026-10-05: unit + integration 100% lines and functions, 97.17% regions (from 79.53% / 91.85% / 72.86%); e2e 79.85% lines. 12 bugs fixed on the way. Open: region gap, writer gaps (`explicit_class`, dropped fields), typed LOC/RRSIG/NSEC3 parsing |
+| [01](.github/community/01-ci-and-supply-chain.md) | CI consolidation and supply chain | ✅ | [ADR-0001](docs/adr/0001-single-build-workflow-and-bind9-e2e-oracle.md). Complete 2026-10-05: one event-gated `build.yaml`, reusable `e2e.yaml` against real BIND 9.18 / 9.20 (every PR, 60/60), every action SHA-pinned, e2e-gated Dependabot auto-merge, CodeQL, Scorecard, license scan, `Cargo.lock` committed with `--locked` builds, branch protection on `main` (PR, signed commits, `PR Checks Passed` + `E2E gate`, admins included). Only `CODECOV_TOKEN` (a secret, not code) is outstanding |
+| [02](.github/community/02-test-coverage.md) | Test coverage | ✅ | [ADR-0002](docs/adr/0002-coverage-policy-and-per-suite-reports.md). Complete 2026-10-05: 100% lines, functions **and regions** (from 79.53% / 91.85% / 72.86%), gated at 100% lines and functions; per-suite reports (unit, integration, e2e) in each workflow's job summary, HTML artifacts and Codecov flags. 12 bugs fixed in the coverage pass, then threat-model findings F1 to F7 and the writer and parser gaps for 0.2.0; follow-ups moved to 03 |
+
+### Grammar fidelity
+
+| # | Roadmap | Status | Notes |
+|---|---|---|---|
+| [03](.github/community/03-grammar-fidelity-follow-ups.md) | Grammar fidelity follow-ups | ⛔ | Opened 2026-10-05 from the 0.2.0 hardening (ADR-0003): `inet` without `port`, zone `forwarders` empty vs absent, `NONE` / `CLASSnnn`, case of enum values, BIND 9.20 removals, SOA annotations tripping the comments warning, comment preservation, winnow 1.0. None loses data |
 
 ## Tracked privately
 
