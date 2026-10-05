@@ -30,6 +30,10 @@
 #     hornet-check-zone-no-errors
 #                             `hornet check-zone` reports no errors on it
 #
+# A fixture whose grammar only exists from some BIND release on declares it
+# with a line `# hornet-e2e: min-bind 9.20`; it is reported SKIP, not run,
+# against older versions (ADR-0004).
+#
 # Known failures live in tests/e2e/known-failures.txt, one per line, with a
 # reason. A listed case that fails is reported XFAIL; a listed case that
 # passes is reported XPASS and fails the run, so the list cannot go stale.
@@ -67,6 +71,7 @@ PASS=0
 FAIL=0
 XFAIL=0
 XPASS=0
+SKIP=0
 FAILED_CASES=""
 
 # Run a BIND9 tool inside the ISC image with the work dir mounted read-only.
@@ -135,6 +140,24 @@ refuses_and_keeps() {
     cmp -s "${before}" "${file}"
 }
 
+# fixture_min_bind <file>: the version in a `# hornet-e2e: min-bind X.Y`
+# marker line, or nothing.
+fixture_min_bind() {
+    sed -n 's/^#[[:space:]]*hornet-e2e:[[:space:]]*min-bind[[:space:]]*\([0-9.]*\).*/\1/p' "$1" | head -n 1
+}
+
+# skip_for_version <fixture-file>: true (and the fixture is reported SKIP) when
+# it needs a newer BIND than ${BIND_VERSION}.
+skip_for_version() {
+    local min
+    min="$(fixture_min_bind "$1")"
+    [ -n "${min}" ] || return 1
+    [ "${min}" != "${BIND_VERSION}" ] || return 1
+    [ "$(printf '%s\n%s\n' "${BIND_VERSION}" "${min}" | sort -V | head -n 1)" = "${BIND_VERSION}" ] || return 1
+    SKIP=$((SKIP + 1))
+    echo "SKIP  $(basename "$1") (needs BIND ${min} or later)"
+}
+
 # check <fixture> <check> <command...>: run a command, record its status.
 check() {
     local fixture="$1" check_name="$2"
@@ -176,6 +199,10 @@ for src in "${WORK}"/in/named-conf/*.conf; do
     converted="${WORK}/out/${name}.convert"
     canon_in="${WORK}/out/${name}.canon-in"
     canon_out="${WORK}/out/${name}.canon-out"
+
+    if skip_for_version "${src}"; then
+        continue
+    fi
 
     check "${name}" bind-accepts-original bind_tool named-checkconf "${rel_in}"
 
@@ -264,7 +291,7 @@ for src in "${WORK}"/in/zones/*.zone; do
 done
 
 echo
-echo "BIND ${BIND_VERSION}: ${PASS} passed, ${FAIL} failed, ${XFAIL} known failures, ${XPASS} unexpected passes"
+echo "BIND ${BIND_VERSION}: ${PASS} passed, ${FAIL} failed, ${XFAIL} known failures, ${XPASS} unexpected passes, ${SKIP} fixtures skipped"
 if [ "${FAIL}" -ne 0 ] || [ "${XPASS}" -ne 0 ]; then
     printf "%b\n" "${FAILED_CASES}"
     exit 1

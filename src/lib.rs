@@ -32,6 +32,7 @@
 //!
 //! | Flag    | Default | Description |
 //! |---------|---------|-------------|
+//! | `cli`   | on      | The `hornet` binary: `clap` and miette's graphical (`fancy`) renderer. Library users can set `default-features = false` |
 //! | `serde` | off     | Derive `serde::Serialize`/`Deserialize` on all AST types |
 
 pub mod ast;

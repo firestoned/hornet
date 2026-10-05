@@ -17,12 +17,14 @@ use super::common::{
     quoted_string, semicolon, size_spec, skip_ws, string_value, ws, yes_no,
 };
 use crate::ast::named_conf::{
-    AclStmt, AddressMatchElement, AddressMatchList, AutoDnssec, CheckNames, ControlsBlock,
-    DnsClass, DnssecValidation, ForwardPolicy, InetControl, KeyStmt, ListenOn, LogCategory,
+    is_duration, AclStmt, AddressMatchElement, AddressMatchList, AutoDnssec, CheckNames,
+    ControlsBlock, DnsClass, DnssecKeyLifetime, DnssecKeyRole, DnssecKeyStorage, DnssecPolicyKey,
+    DnssecPolicyStmt, DnssecValidation, ForwardPolicy, InetControl, KeyStmt, ListenOn, LogCategory,
     LogChannel, LogDestination, LogSeverity, LogVersions, LoggingBlock, NamedConf, NotifyOption,
-    OptionsBlock, PrimariesStmt, RateLimit, RemoteServer, ResponsePolicy, ServerOptions,
-    ServerStmt, Statement, SyslogFacility, TransferFormat, UnixControl, UpdateAction, UpdatePolicy,
-    UpdatePolicyRule, ViewOptions, ViewStmt, ZoneOptions, ZoneStmt, ZoneType,
+    Nsec3Param, OptionsBlock, PrimariesStmt, PrintTime, RateLimit, RemoteServer, ResponsePolicy,
+    ServerOptions, ServerStmt, Statement, SyslogFacility, TransferFormat, UnixControl,
+    UpdateAction, UpdatePolicy, UpdatePolicyRule, ViewOptions, ViewStmt, ZoneOptions, ZoneStmt,
+    ZoneType,
 };
 
 /// `update-policy` rule type whose rule names no domain.
@@ -74,6 +76,7 @@ fn statement(input: &mut &str) -> ModalResult<Statement> {
         key_stmt.map(Statement::Key),
         primaries_stmt.map(Statement::Primaries),
         server_stmt.map(Statement::Server),
+        dnssec_policy_stmt.map(Statement::DnssecPolicy),
         unknown_stmt,
     ))
     .parse_next(input)
@@ -108,27 +111,35 @@ fn options_stmt(input: &mut &str) -> ModalResult<OptionsBlock> {
     Ok(block)
 }
 
+/// The `options` field a string-valued option is stored in, if `key` is one.
+fn string_option_slot<'b>(
+    block: &'b mut OptionsBlock,
+    key: &str,
+) -> Option<&'b mut Option<String>> {
+    Some(match key {
+        "directory" => &mut block.directory,
+        "dump-file" => &mut block.dump_file,
+        "statistics-file" => &mut block.statistics_file,
+        "pid-file" => &mut block.pid_file,
+        "version" => &mut block.version,
+        "hostname" => &mut block.hostname,
+        "server-id" => &mut block.server_id,
+        "key-directory" => &mut block.key_directory,
+        "dnssec-policy" => &mut block.dnssec_policy,
+        _ => return None,
+    })
+}
+
 fn parse_option_kv(input: &mut &str, block: &mut OptionsBlock) -> ModalResult<()> {
     let key: String = bareword(input)?;
     skip_ws(input);
 
+    if let Some(slot) = string_option_slot(block, &key) {
+        *slot = Some(string_value(input)?);
+        return semicolon(input);
+    }
+
     match key.as_str() {
-        "directory" => {
-            block.directory = Some(string_value(input)?);
-            semicolon(input)?;
-        }
-        "dump-file" => {
-            block.dump_file = Some(string_value(input)?);
-            semicolon(input)?;
-        }
-        "statistics-file" => {
-            block.statistics_file = Some(string_value(input)?);
-            semicolon(input)?;
-        }
-        "pid-file" => {
-            block.pid_file = Some(string_value(input)?);
-            semicolon(input)?;
-        }
         "listen-on" => {
             let lo = listen_on_clause(input)?;
             block.listen_on.push(lo);
@@ -192,16 +203,8 @@ fn parse_option_kv(input: &mut &str, block: &mut OptionsBlock) -> ModalResult<()
             block.max_cache_size = Some(size_spec(input)?);
             semicolon(input)?;
         }
-        "version" => {
-            block.version = Some(string_value(input)?);
-            semicolon(input)?;
-        }
-        "hostname" => {
-            block.hostname = Some(string_value(input)?);
-            semicolon(input)?;
-        }
-        "server-id" => {
-            block.server_id = Some(string_value(input)?);
+        "allow-new-zones" => {
+            block.allow_new_zones = Some(yes_no(input)?);
             semicolon(input)?;
         }
         _ => parse_lenient_option(input, key, block),
@@ -716,7 +719,7 @@ fn log_channel(input: &mut &str) -> ModalResult<LogChannel> {
     skip_ws(input);
     let mut dest: Option<LogDestination> = None;
     let mut severity: Option<LogSeverity> = None;
-    let mut print_time: Option<bool> = None;
+    let mut print_time: Option<PrintTime> = None;
     let mut print_severity: Option<bool> = None;
     let mut print_category: Option<bool> = None;
     let mut buffered: Option<bool> = None;
@@ -759,7 +762,7 @@ fn log_channel(input: &mut &str) -> ModalResult<LogChannel> {
                 semicolon(input)?;
             }
             "print-time" => {
-                print_time = Some(yes_no(input)?);
+                print_time = Some(print_time_value(input)?);
                 semicolon(input)?;
             }
             "print-severity" => {
@@ -790,6 +793,19 @@ fn log_channel(input: &mut &str) -> ModalResult<LogChannel> {
         print_category,
         buffered,
     })
+}
+
+/// `yes` / `no`, or (BIND 9.16 and later) `local`, `iso8601`, `iso8601-utc`,
+/// which BIND matches case-insensitively.
+fn print_time_value(input: &mut &str) -> ModalResult<PrintTime> {
+    alt((
+        literal("yes").map(|_| PrintTime::Yes),
+        literal("no").map(|_| PrintTime::No),
+        keyword("local").map(|_| PrintTime::Local),
+        keyword("iso8601-utc").map(|_| PrintTime::Iso8601Utc),
+        keyword("iso8601").map(|_| PrintTime::Iso8601),
+    ))
+    .parse_next(input)
 }
 
 fn log_versions(input: &mut &str) -> ModalResult<LogVersions> {
@@ -1113,6 +1129,171 @@ fn query_source<'i>(
     address: fn(&mut &'i str) -> ModalResult<IpAddr>,
 ) -> impl Parser<&'i str, IpAddr, ContextError> {
     preceded(winnow::combinator::opt((keyword("address"), ws)), address)
+}
+
+// ── dnssec-policy ──────────────────────────────────────────────────────────────
+
+/// `dnssec-policy <name> { … };`. A malformed header or block structure fails
+/// the statement; a clause outside the typed grammar is kept in `extra`.
+fn dnssec_policy_stmt(input: &mut &str) -> ModalResult<DnssecPolicyStmt> {
+    keyword("dnssec-policy").parse_next(input)?;
+    skip_ws(input);
+    let name = string_value(input)?;
+    open_brace(input)?;
+    let mut policy = DnssecPolicyStmt {
+        name,
+        ..Default::default()
+    };
+    while !input.starts_with('}') && !input.is_empty() {
+        parse_policy_clause(input, &mut policy)?;
+        skip_ws(input);
+    }
+    close_brace_semi(input)?;
+    Ok(policy)
+}
+
+fn parse_policy_clause(input: &mut &str, p: &mut DnssecPolicyStmt) -> ModalResult<()> {
+    let key: String = bareword(input)?;
+    skip_ws(input);
+    let extra = &mut p.extra;
+    let duration_slot = match key.as_str() {
+        "keys" => {
+            p.keys = typed_or_raw(input, &key, extra, policy_keys_block);
+            return Ok(());
+        }
+        "nsec3param" => {
+            let args = |i: &mut &str| -> ModalResult<Nsec3Param> { Ok(nsec3param(i)) };
+            p.nsec3param = typed_or_raw(input, &key, extra, args);
+            return Ok(());
+        }
+        "cds-digest-types" => {
+            p.cds_digest_types = typed_or_raw(input, &key, extra, string_list_block);
+            return Ok(());
+        }
+        "cdnskey" | "inline-signing" | "manual-mode" | "offline-ksk" => {
+            let slot = match key.as_str() {
+                "cdnskey" => &mut p.cdnskey,
+                "inline-signing" => &mut p.inline_signing,
+                "manual-mode" => &mut p.manual_mode,
+                _ => &mut p.offline_ksk,
+            };
+            *slot = typed_or_raw(input, &key, extra, yes_no);
+            return Ok(());
+        }
+        "dnskey-ttl" => &mut p.dnskey_ttl,
+        "max-zone-ttl" => &mut p.max_zone_ttl,
+        "parent-ds-ttl" => &mut p.parent_ds_ttl,
+        "parent-propagation-delay" => &mut p.parent_propagation_delay,
+        "publish-safety" => &mut p.publish_safety,
+        "purge-keys" => &mut p.purge_keys,
+        "retire-safety" => &mut p.retire_safety,
+        "signatures-jitter" => &mut p.signatures_jitter,
+        "signatures-refresh" => &mut p.signatures_refresh,
+        "signatures-validity" => &mut p.signatures_validity,
+        "signatures-validity-dnskey" => &mut p.signatures_validity_dnskey,
+        "zone-propagation-delay" => &mut p.zone_propagation_delay,
+        _ => {
+            let raw = take_to_semi(input);
+            extra.push((key, raw));
+            return Ok(());
+        }
+    };
+    *duration_slot = typed_or_raw(input, &key, extra, duration);
+    Ok(())
+}
+
+/// `{ entry; … }` of a policy's `keys` clause.
+fn policy_keys_block(input: &mut &str) -> ModalResult<Vec<DnssecPolicyKey>> {
+    open_brace(input)?;
+    let mut keys = Vec::new();
+    loop {
+        if let Some(rest) = input.strip_prefix('}') {
+            *input = rest;
+            return Ok(keys);
+        }
+        keys.push(policy_key(input)?);
+        semicolon(input)?;
+    }
+}
+
+/// `role [key-directory | key-store "name"] lifetime L algorithm A [tag-range MIN MAX] [BITS]`
+fn policy_key(input: &mut &str) -> ModalResult<DnssecPolicyKey> {
+    let role = alt((
+        keyword("csk").map(|_| DnssecKeyRole::Csk),
+        keyword("ksk").map(|_| DnssecKeyRole::Ksk),
+        keyword("zsk").map(|_| DnssecKeyRole::Zsk),
+    ))
+    .parse_next(input)?;
+    skip_ws(input);
+    let storage = optional(
+        input,
+        alt((
+            keyword("key-directory").map(|_| DnssecKeyStorage::KeyDirectory),
+            preceded((keyword("key-store"), ws), string_value).map(DnssecKeyStorage::KeyStore),
+        )),
+    );
+    skip_ws(input);
+    keyword("lifetime").parse_next(input)?;
+    skip_ws(input);
+    let lifetime = alt((
+        literal("unlimited").map(|_| DnssecKeyLifetime::Unlimited),
+        duration.map(DnssecKeyLifetime::Duration),
+    ))
+    .parse_next(input)?;
+    skip_ws(input);
+    keyword("algorithm").parse_next(input)?;
+    skip_ws(input);
+    let algorithm = take_while(1.., |c: char| c.is_ascii_alphanumeric())
+        .map(str::to_owned)
+        .parse_next(input)?;
+    skip_ws(input);
+    let tag_range = optional(
+        input,
+        (keyword("tag-range"), ws, port_number, ws, port_number)
+            .map(|(_, (), lo, (), hi)| (lo, hi)),
+    );
+    skip_ws(input);
+    let bits = optional(input, u32_value);
+    Ok(DnssecPolicyKey {
+        role,
+        storage,
+        lifetime,
+        algorithm,
+        tag_range,
+        bits,
+    })
+}
+
+/// `[iterations N] [optout yes|no] [salt-length N]`, in that order. Never
+/// fails: an argument it cannot read is left for the caller's `;` check.
+fn nsec3param(input: &mut &str) -> Nsec3Param {
+    let iterations = optional(input, preceded((keyword("iterations"), ws), u32_value));
+    skip_ws(input);
+    let optout = optional(input, preceded((keyword("optout"), ws), yes_no));
+    skip_ws(input);
+    let salt_length = optional(input, preceded((keyword("salt-length"), ws), u32_value));
+    Nsec3Param {
+        iterations,
+        optout,
+        salt_length,
+    }
+}
+
+/// A BIND duration token (see [`is_duration`]).
+fn duration(input: &mut &str) -> ModalResult<String> {
+    take_while(1.., |c: char| c.is_ascii_alphanumeric())
+        .verify(|s: &str| is_duration(s))
+        .map(str::to_owned)
+        .parse_next(input)
+}
+
+/// `{ "a"; b; … }`
+fn string_list_block(input: &mut &str) -> ModalResult<Vec<String>> {
+    '{'.parse_next(input)?;
+    let list = many0(input, string_list_entry);
+    skip_ws(input);
+    '}'.parse_next(input)?;
+    Ok(list)
 }
 
 // ── DNS class ─────────────────────────────────────────────────────────────────

@@ -286,6 +286,12 @@ fn main() -> miette::Result<()> {
 }
 ```
 
+!!! note "Graphical output needs `miette/fancy`"
+    Since 0.3.0 hornet enables miette's `fancy` feature only with its `cli` feature, so
+    library consumers do not compile a terminal rendering stack. For the graphical
+    report in your own program, enable it there:
+    `miette = { version = "7", features = ["fancy"] }`.
+
 !!! note
     The diagnostic span currently points at the start of the source rather than the
     offending token. Zone-file errors carry the line number in the message.

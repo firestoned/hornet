@@ -41,6 +41,7 @@ Statuses were verified against the 0.2.0 release tree on 2026-10-05.
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
 | [03](.github/community/03-grammar-fidelity-follow-ups.md) | Grammar fidelity follow-ups | ⛔ | Opened 2026-10-05 from the 0.2.0 hardening (ADR-0003): `inet` without `port`, zone `forwarders` empty vs absent, `NONE` / `CLASSnnn`, case of enum values, BIND 9.20 removals, SOA annotations tripping the comments warning, comment preservation, winnow 1.0. None loses data |
+| [04](.github/community/04-bindy-rendering-support.md) | Rendering support for bindy (0.3.0) | ✅ | [ADR-0004](docs/adr/0004-typed-dnssec-policy-print-time-and-options-for-bindy.md). Done 2026-10-05, unreleased: `PrintTime`, typed `Statement::DnssecPolicy` (9.18 and 9.20 grammar) with validator rules checked against `named-checkconf`, typed `allow-new-zones` / `key-directory` / `dnssec-policy` in `options`, `miette/fancy` only with `cli` (library build 71 to 15 crates). e2e 70/70 on 9.18, 80/80 on 9.20; 100% coverage |
 
 ## Tracked privately
 

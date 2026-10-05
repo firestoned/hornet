@@ -121,11 +121,70 @@ controls {
 include "/etc/bind/named.conf.local";
 "#;
 
-const ALL_CONFS: [(&str, &str); 4] = [
+/// Everything bindy renders that hornet 0.2.0 could not type (ADR-0004).
+const BINDY_CONF: &str = r#"
+options {
+    directory "/var/cache/bind";
+    allow-new-zones yes;
+    key-directory "/var/cache/bind/keys";
+    dnssec-policy "bindy";
+};
+
+dnssec-policy "bindy" {
+    keys {
+        ksk lifetime 365d algorithm ECDSAP256SHA256;
+        zsk lifetime unlimited algorithm ECDSAP256SHA256;
+    };
+    nsec3param iterations 0 optout no salt-length 0;
+    signatures-refresh 5d;
+    signatures-validity 30d;
+    signatures-validity-dnskey 30d;
+    zone-propagation-delay 300;
+    parent-propagation-delay 3600;
+    max-zone-ttl 86400;
+};
+
+dnssec-policy "nsec" {
+    keys {
+        csk key-store "hsm" lifetime unlimited algorithm 13 tag-range 0 32767;
+        ksk key-directory lifetime P1Y algorithm rsasha256 tag-range 1 2 2048;
+        zsk lifetime P90D algorithm 8 1024;
+    };
+    cdnskey yes;
+    cds-digest-types { 2; "sha-384"; };
+    dnskey-ttl PT1H;
+    inline-signing yes;
+    manual-mode no;
+    offline-ksk no;
+    parent-ds-ttl 1d;
+    publish-safety 1h;
+    purge-keys P90D;
+    retire-safety 2d;
+    signatures-jitter 12h;
+    future-clause "kept";
+};
+
+logging {
+    channel "default_stderr" {
+        stderr;
+        severity info;
+        print-time iso8601;
+        print-category yes;
+        print-severity yes;
+    };
+    channel "utc" { stderr; print-time iso8601-utc; };
+    channel "local" { stderr; print-time local; };
+    channel "off" { stderr; print-time no; };
+    category "default" { "default_stderr"; };
+};
+"#;
+
+const ALL_CONFS: [(&str, &str); 5] = [
     ("options", OPTIONS_CONF),
     ("zones", ZONES_CONF),
     ("views", VIEWS_CONF),
     ("logging-controls", LOGGING_CONTROLS_CONF),
+    ("bindy", BINDY_CONF),
 ];
 
 fn option_matrix() -> Vec<WriteOptions> {
@@ -255,6 +314,7 @@ fn fixtures_parse_to_the_expected_statement_counts() {
         ("zones", 7),
         ("views", 2),
         ("logging-controls", 3),
+        ("bindy", 4),
     ];
     for ((label, text), (expected_label, count)) in ALL_CONFS.iter().zip(expected) {
         assert_eq!(*label, expected_label);
@@ -310,4 +370,84 @@ fn controls_read_only_round_trips() {
     let out = write_named_conf(&conf, &WriteOptions::default());
     assert!(out.contains("read-only yes;"));
     assert_eq!(parse_named_conf(&out).unwrap(), conf);
+}
+
+#[test]
+fn bindy_constructs_are_typed_not_raw() {
+    let conf = parse_named_conf(BINDY_CONF).unwrap();
+    assert!(
+        !conf
+            .statements
+            .iter()
+            .any(|s| matches!(s, Statement::Unknown { .. })),
+        "{conf:?}"
+    );
+    let Statement::Options(o) = &conf.statements[0] else {
+        panic!("expected Options");
+    };
+    assert!(o.extra.is_empty(), "{:?}", o.extra);
+    let Statement::DnssecPolicy(p) = &conf.statements[1] else {
+        panic!("expected DnssecPolicy");
+    };
+    assert!(p.extra.is_empty(), "{:?}", p.extra);
+    assert!(hornet_bind9::validate_named_conf(&conf)
+        .iter()
+        .all(|d| d.severity != hornet_bind9::Severity::Error));
+}
+
+/// ADR-0003 applied to the new positions: an AST holding hostile text in every
+/// modelled string of a policy writes to text that parses back to the same AST
+/// (strings) or is quoted where BIND requires a bare token (durations,
+/// algorithm), so nothing escapes its position.
+#[test]
+fn adversarial_dnssec_policy_strings_round_trip() {
+    use hornet_bind9::named_conf::{
+        DnssecKeyLifetime, DnssecKeyRole, DnssecKeyStorage, DnssecPolicyKey, DnssecPolicyStmt,
+        OptionsBlock,
+    };
+    let hostile = "x\\\"; }; options { recursion yes; }; #";
+    let conf = NamedConf {
+        statements: vec![
+            Statement::Options(OptionsBlock {
+                key_directory: Some(hostile.to_string()),
+                dnssec_policy: Some(hostile.to_string()),
+                ..Default::default()
+            }),
+            Statement::DnssecPolicy(DnssecPolicyStmt {
+                name: hostile.to_string(),
+                keys: Some(vec![DnssecPolicyKey {
+                    role: DnssecKeyRole::Csk,
+                    storage: Some(DnssecKeyStorage::KeyStore(hostile.to_string())),
+                    lifetime: DnssecKeyLifetime::Duration("1d".to_string()),
+                    algorithm: "13".to_string(),
+                    tag_range: None,
+                    bits: None,
+                }]),
+                cds_digest_types: Some(vec![hostile.to_string()]),
+                ..Default::default()
+            }),
+        ],
+    };
+    let out = write_named_conf(&conf, &WriteOptions::default());
+    assert_eq!(parse_named_conf(&out).unwrap(), conf, "{out}");
+
+    let mut bad_tokens = conf.clone();
+    let Statement::DnssecPolicy(p) = &mut bad_tokens.statements[1] else {
+        unreachable!()
+    };
+    p.signatures_refresh = Some(hostile.to_string());
+    let keys = p.keys.as_mut().unwrap();
+    keys[0].algorithm = hostile.to_string();
+    keys[0].lifetime = DnssecKeyLifetime::Duration(hostile.to_string());
+    let out = write_named_conf(&bad_tokens, &WriteOptions::default());
+    let reparsed = parse_named_conf(&out).unwrap();
+    // Still exactly two statements: nothing was injected at the top level.
+    assert_eq!(reparsed.statements.len(), 2, "{out}");
+    let Statement::DnssecPolicy(p) = &reparsed.statements[1] else {
+        panic!("expected DnssecPolicy: {out}");
+    };
+    // The quoted tokens are not valid in BIND, so hornet keeps them verbatim.
+    assert!(p.signatures_refresh.is_none(), "{out}");
+    assert!(p.keys.is_none(), "{out}");
+    assert_eq!(p.extra.len(), 2, "{:?}", p.extra);
 }

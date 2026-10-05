@@ -6,11 +6,13 @@ mod tests {
     use super::super::write_named_conf;
     use crate::ast::named_conf::{
         AclStmt, AddressMatchElement, AutoDnssec, CheckNames, ControlsBlock, DnsClass,
+        DnssecKeyLifetime, DnssecKeyRole, DnssecKeyStorage, DnssecPolicyKey, DnssecPolicyStmt,
         DnssecValidation, ForwardPolicy, InetControl, KeyStmt, ListenOn, LogCategory, LogChannel,
         LogDestination, LogSeverity, LogVersions, LoggingBlock, NamedConf, NotifyOption,
-        OptionsBlock, PrimariesStmt, RateLimit, RemoteServer, ResponsePolicy, ServerOptions,
-        ServerStmt, SizeSpec, Statement, SyslogFacility, TransferFormat, UnixControl, UpdateAction,
-        UpdatePolicy, UpdatePolicyRule, ViewOptions, ViewStmt, ZoneOptions, ZoneStmt, ZoneType,
+        Nsec3Param, OptionsBlock, PrimariesStmt, PrintTime, RateLimit, RemoteServer,
+        ResponsePolicy, ServerOptions, ServerStmt, SizeSpec, Statement, SyslogFacility,
+        TransferFormat, UnixControl, UpdateAction, UpdatePolicy, UpdatePolicyRule, ViewOptions,
+        ViewStmt, ZoneOptions, ZoneStmt, ZoneType,
     };
     use crate::writer::WriteOptions;
 
@@ -1385,7 +1387,7 @@ mod tests {
     #[test]
     fn test_write_logging_channel_flags_exact() {
         let mut ch = channel("main", LogDestination::Null);
-        ch.print_time = Some(true);
+        ch.print_time = Some(PrintTime::Yes);
         ch.print_severity = Some(false);
         ch.print_category = Some(true);
         ch.buffered = Some(false);
@@ -2177,5 +2179,285 @@ mod tests {
             secret: "s".to_string(),
         }));
         assert!(out.contains("algorithm \"hmäc\";"), "{out}");
+    }
+
+    // ── print-time (ADR-0004) ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_write_print_time_every_value() {
+        let cases = [
+            (PrintTime::Yes, "print-time yes;"),
+            (PrintTime::No, "print-time no;"),
+            (PrintTime::Local, "print-time local;"),
+            (PrintTime::Iso8601, "print-time iso8601;"),
+            (PrintTime::Iso8601Utc, "print-time iso8601-utc;"),
+        ];
+        for (value, line) in cases {
+            let mut ch = channel("c", LogDestination::Stderr);
+            ch.print_time = Some(value);
+            let out = render(Statement::Logging(LoggingBlock {
+                channels: vec![ch],
+                categories: vec![],
+            }));
+            assert!(out.contains(&format!("        {line}\n")), "{out}");
+        }
+    }
+
+    // ── options: allow-new-zones, key-directory, dnssec-policy (ADR-0004) ─────
+
+    #[test]
+    fn test_write_options_new_typed_fields() {
+        let out = render(Statement::Options(OptionsBlock {
+            allow_new_zones: Some(true),
+            key_directory: Some("/var/cache/bind/keys".to_string()),
+            dnssec_policy: Some("bindy".to_string()),
+            ..Default::default()
+        }));
+        assert_eq!(
+            out,
+            "options {\n\
+             \x20   key-directory \"/var/cache/bind/keys\";\n\
+             \x20   allow-new-zones yes;\n\
+             \x20   dnssec-policy \"bindy\";\n\
+             };\n"
+        );
+    }
+
+    #[test]
+    fn test_write_options_new_fields_are_string_positions() {
+        let out = render(Statement::Options(OptionsBlock {
+            allow_new_zones: Some(false),
+            key_directory: Some("/k\";\nrecursion yes".to_string()),
+            dnssec_policy: Some("p\"; } ; x".to_string()),
+            ..Default::default()
+        }));
+        assert!(out.contains("allow-new-zones no;"), "{out}");
+        assert!(
+            out.contains("key-directory \"/k\\\";\nrecursion yes\";"),
+            "{out}"
+        );
+        assert!(out.contains("dnssec-policy \"p\\\"; } ; x\";"), "{out}");
+    }
+
+    // ── dnssec-policy (ADR-0004) ───────────────────────────────────────────────
+
+    fn key(role: DnssecKeyRole, lifetime: DnssecKeyLifetime, algorithm: &str) -> DnssecPolicyKey {
+        DnssecPolicyKey {
+            role,
+            storage: None,
+            lifetime,
+            algorithm: algorithm.to_string(),
+            tag_range: None,
+            bits: None,
+        }
+    }
+
+    fn duration(s: &str) -> DnssecKeyLifetime {
+        DnssecKeyLifetime::Duration(s.to_string())
+    }
+
+    /// The policy bindy renders, built as an AST.
+    fn bindy_policy() -> DnssecPolicyStmt {
+        DnssecPolicyStmt {
+            name: "bindy".to_string(),
+            keys: Some(vec![
+                key(DnssecKeyRole::Ksk, duration("365d"), "ECDSAP256SHA256"),
+                key(DnssecKeyRole::Zsk, duration("90d"), "ECDSAP256SHA256"),
+            ]),
+            nsec3param: Some(Nsec3Param {
+                iterations: Some(0),
+                optout: Some(false),
+                salt_length: Some(0),
+            }),
+            signatures_refresh: Some("5d".to_string()),
+            signatures_validity: Some("30d".to_string()),
+            signatures_validity_dnskey: Some("30d".to_string()),
+            zone_propagation_delay: Some("300".to_string()),
+            parent_propagation_delay: Some("3600".to_string()),
+            max_zone_ttl: Some("86400".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_write_bindy_dnssec_policy_exact() {
+        let out = render(Statement::DnssecPolicy(bindy_policy()));
+        assert_eq!(
+            out,
+            "dnssec-policy \"bindy\" {\n\
+             \x20   keys {\n\
+             \x20       ksk lifetime 365d algorithm ECDSAP256SHA256;\n\
+             \x20       zsk lifetime 90d algorithm ECDSAP256SHA256;\n\
+             \x20   };\n\
+             \x20   max-zone-ttl 86400;\n\
+             \x20   nsec3param iterations 0 optout no salt-length 0;\n\
+             \x20   parent-propagation-delay 3600;\n\
+             \x20   signatures-refresh 5d;\n\
+             \x20   signatures-validity 30d;\n\
+             \x20   signatures-validity-dnskey 30d;\n\
+             \x20   zone-propagation-delay 300;\n\
+             };\n"
+        );
+    }
+
+    #[test]
+    fn test_write_dnssec_policy_every_clause() {
+        let policy = DnssecPolicyStmt {
+            name: "full".to_string(),
+            keys: Some(vec![
+                DnssecPolicyKey {
+                    role: DnssecKeyRole::Csk,
+                    storage: Some(DnssecKeyStorage::KeyStore("hsm".to_string())),
+                    lifetime: DnssecKeyLifetime::Unlimited,
+                    algorithm: "13".to_string(),
+                    tag_range: Some((0, 32767)),
+                    bits: None,
+                },
+                DnssecPolicyKey {
+                    role: DnssecKeyRole::Ksk,
+                    storage: Some(DnssecKeyStorage::KeyDirectory),
+                    lifetime: duration("P1Y"),
+                    algorithm: "rsasha256".to_string(),
+                    tag_range: Some((1, 2)),
+                    bits: Some(2048),
+                },
+            ]),
+            cdnskey: Some(true),
+            cds_digest_types: Some(vec!["2".to_string(), "sha-384".to_string()]),
+            dnskey_ttl: Some("PT1H".to_string()),
+            inline_signing: Some(false),
+            manual_mode: Some(true),
+            max_zone_ttl: Some("1d".to_string()),
+            nsec3param: Some(Nsec3Param::default()),
+            offline_ksk: Some(false),
+            parent_ds_ttl: Some("1d".to_string()),
+            parent_propagation_delay: Some("1h".to_string()),
+            publish_safety: Some("1h".to_string()),
+            purge_keys: Some("P90D".to_string()),
+            retire_safety: Some("2d".to_string()),
+            signatures_jitter: Some("12h".to_string()),
+            signatures_refresh: Some("5d".to_string()),
+            signatures_validity: Some("2w".to_string()),
+            signatures_validity_dnskey: Some("2w".to_string()),
+            zone_propagation_delay: Some("PT5M".to_string()),
+            extra: vec![("future-clause".to_string(), "yes".to_string())],
+        };
+        let out = render(Statement::DnssecPolicy(policy));
+        assert_eq!(
+            out,
+            "dnssec-policy \"full\" {\n\
+             \x20   keys {\n\
+             \x20       csk key-store \"hsm\" lifetime unlimited algorithm 13 tag-range 0 32767;\n\
+             \x20       ksk key-directory lifetime P1Y algorithm rsasha256 tag-range 1 2 2048;\n\
+             \x20   };\n\
+             \x20   cdnskey yes;\n\
+             \x20   cds-digest-types { \"2\"; \"sha-384\"; };\n\
+             \x20   dnskey-ttl PT1H;\n\
+             \x20   inline-signing no;\n\
+             \x20   manual-mode yes;\n\
+             \x20   max-zone-ttl 1d;\n\
+             \x20   nsec3param;\n\
+             \x20   offline-ksk no;\n\
+             \x20   parent-ds-ttl 1d;\n\
+             \x20   parent-propagation-delay 1h;\n\
+             \x20   publish-safety 1h;\n\
+             \x20   purge-keys P90D;\n\
+             \x20   retire-safety 2d;\n\
+             \x20   signatures-jitter 12h;\n\
+             \x20   signatures-refresh 5d;\n\
+             \x20   signatures-validity 2w;\n\
+             \x20   signatures-validity-dnskey 2w;\n\
+             \x20   zone-propagation-delay PT5M;\n\
+             \x20   future-clause yes;\n\
+             };\n"
+        );
+    }
+
+    #[test]
+    fn test_write_dnssec_policy_empty_keys_and_bare_extra() {
+        let out = render(Statement::DnssecPolicy(DnssecPolicyStmt {
+            name: "p".to_string(),
+            keys: Some(vec![]),
+            nsec3param: Some(Nsec3Param {
+                iterations: None,
+                optout: Some(true),
+                salt_length: None,
+            }),
+            extra: vec![("flag".to_string(), String::new())],
+            ..Default::default()
+        }));
+        assert_eq!(
+            out,
+            "dnssec-policy \"p\" {\n\
+             \x20   keys {\n\
+             \x20   };\n\
+             \x20   nsec3param optout yes;\n\
+             \x20   flag;\n\
+             };\n"
+        );
+    }
+
+    #[test]
+    fn test_write_dnssec_policy_without_keys_omits_clause() {
+        let out = render(Statement::DnssecPolicy(DnssecPolicyStmt {
+            name: "p".to_string(),
+            ..Default::default()
+        }));
+        assert_eq!(out, "dnssec-policy \"p\" {\n};\n");
+    }
+
+    /// ADR-0003 positions: the name, key-store name and digest types are
+    /// strings; durations and the algorithm are written bare only when they
+    /// match their grammar, and quoted (which BIND rejects) otherwise.
+    #[test]
+    fn test_write_dnssec_policy_escapes_every_position() {
+        let injected = "1d; }; }; options { recursion yes";
+        let out = render(Statement::DnssecPolicy(DnssecPolicyStmt {
+            name: "evil\"; };".to_string(),
+            keys: Some(vec![DnssecPolicyKey {
+                role: DnssecKeyRole::Zsk,
+                storage: Some(DnssecKeyStorage::KeyStore("ks\"x".to_string())),
+                lifetime: duration(injected),
+                algorithm: "13; zsk".to_string(),
+                tag_range: None,
+                bits: None,
+            }]),
+            cds_digest_types: Some(vec!["2\"; x".to_string()]),
+            signatures_refresh: Some(injected.to_string()),
+            ..Default::default()
+        }));
+        assert!(
+            out.starts_with("dnssec-policy \"evil\\\"; };\" {\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "zsk key-store \"ks\\\"x\" lifetime \"1d; }; }; options { recursion yes\" \
+                 algorithm \"13; zsk\";"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("cds-digest-types { \"2\\\"; x\"; };"), "{out}");
+        assert!(
+            out.contains("signatures-refresh \"1d; }; }; options { recursion yes\";"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn test_write_dnssec_policy_empty_algorithm_is_quoted() {
+        let out = render(Statement::DnssecPolicy(DnssecPolicyStmt {
+            name: "p".to_string(),
+            keys: Some(vec![key(
+                DnssecKeyRole::Csk,
+                DnssecKeyLifetime::Unlimited,
+                "",
+            )]),
+            ..Default::default()
+        }));
+        assert!(
+            out.contains("csk lifetime unlimited algorithm \"\";"),
+            "{out}"
+        );
     }
 }

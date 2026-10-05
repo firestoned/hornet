@@ -158,6 +158,11 @@ Real hornet bugs that BIND9 catches are listed in `tests/e2e/known-failures.txt`
 with a reason, rather than hidden by weakening a check. A listed case that
 starts passing fails the run, so delete its line when you fix the bug.
 
+A fixture whose grammar only exists from some BIND release on starts with a
+`# hornet-e2e: min-bind 9.20` line; the suite reports it `SKIP` against older
+versions instead of failing (`dnssec-policy-920.conf` uses it for the clauses
+BIND 9.20 added).
+
 Besides the round trip, the suite runs the rest of the CLI on every fixture:
 `check` and `check-zone` must report no errors on input BIND9 accepts, `fmt`
 in place must write exactly what `parse` prints (and `fmt --check` must then

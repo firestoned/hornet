@@ -4,6 +4,33 @@ Internal development log. For the public release changelog see `docs/src/referen
 
 Each entry documents what changed, who requested it, and why — required for auditability.
 
+## [2026-10-05 23:30] - 0.3.0: typed dnssec-policy, print-time and options for bindy rendering; miette/fancy only with cli
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docs/adr/0004-typed-dnssec-policy-print-time-and-options-for-bindy.md` (new): the decision, motivated by bindy ADR-0013 stage 3, with the BIND 9.18 / 9.20 grammar evidence from `named-checkconf`
+- `src/ast/named_conf.rs`: `PrintTime` (replaces `Option<bool>` on `LogChannel::print_time`); `Statement::DnssecPolicy(DnssecPolicyStmt)` with `DnssecPolicyKey`, `DnssecKeyRole`, `DnssecKeyStorage`, `DnssecKeyLifetime`, `Nsec3Param`; `is_duration`; `BUILTIN_DNSSEC_POLICIES`; `OptionsBlock::{allow_new_zones, key_directory, dnssec_policy}`; `large_enum_variant` allowed on `Statement` with the reason
+- `src/parser/named_conf.rs`: `print_time_value`, `dnssec_policy_stmt`, `parse_policy_clause`, `policy_keys_block`, `policy_key`, `nsec3param`, `duration`, `string_list_block`; string-valued `options` dispatched through `string_option_slot` (same behaviour, keeps `parse_option_kv` under the length limit)
+- `src/writer/named_conf.rs`: `write_dnssec_policy`, `policy_clauses`, `write_policy_key`, `nsec3param_args`, `duration_or_quoted`, `algorithm_or_quoted`; `print-time` from `PrintTime`; new `options` fields; the four duplicated raw-`extra` loops folded into `write_extra`
+- `src/validator/mod.rs`: `check_dnssec_policy`, `check_dnssec_policy_names`, `check_policy_extra`, `check_policy_keys`, `check_policy_durations`, `check_dnssec_policy_references`; Error / Warning split mirrors `named-checkconf` (ADR-0004 table)
+- `Cargo.toml`: `cli = ["dep:clap", "miette/fancy"]`, `miette = "7"`; library-only build goes from 71 to 15 crates, CLI output byte-identical before and after; `Cargo.lock` unchanged
+- `src/lib.rs`: `cli` row in the feature table
+- Tests: 866 to 918 (unit: AST, parser incl. malformed-statement and verbatim-clause tables, writer incl. escaping, validator; integration: `bindy` round-trip fixture under every `WriteOptions`, adversarial policy strings); 100% lines, functions and regions
+- `tests/e2e/run.sh`: `# hornet-e2e: min-bind X.Y` fixture marker (SKIP on older BIND); fixtures `dnssec-policy.conf`, `dnssec-policy-920.conf`; 70/70 on BIND 9.18.50, 80/80 on 9.20.29 (podman on the build host)
+- Docs: `docs/src/reference/{named-conf-constructs,changelog,error-types}.md`, `docs/src/guide/{validating,writing,parsing}.md`, `docs/src/concepts/architecture.md`, `docs/src/installation/installation.md`, `docs/src/development/testing.md`, `README.md`
+- Roadmap 04 (`.github/community/04-bindy-rendering-support.md`, new, done), `.github/community/README.md`, `ROADMAPS.md`
+- `docs/src/security/threat-model.md`: full pass against ADR-0001 ... ADR-0004, v1.3; T1 to T4, T9, TB2 and section 8 updated; new T12 (validator stricter than BIND blocking a gated pipeline) and AR4 (version-specific grammar not gated); no new findings
+
+### Why
+bindy (ADR-0013) cannot render its configuration through hornet's writer while `print-time iso8601` and `dnssec-policy` fall back to raw `Statement::Unknown`, and `allow-new-zones` / `key-directory` sit in `extra`; and every library consumer compiled miette's terminal stack.
+
+### Impact
+- [x] Breaking change (`LogChannel::print_time` type, new `Statement` variant, new `OptionsBlock` fields, `miette/fancy` no longer enabled for library builds)
+- [x] New feature
+- [ ] Bug fix
+- [ ] Documentation only
+
 ## [2026-10-05 23:00] - 0.2.0 hardening: threat-model findings F1 to F7, grammar gaps, CI lock-down
 
 **Author:** Erick Bourgeois

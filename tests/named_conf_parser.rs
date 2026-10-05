@@ -118,6 +118,7 @@ fn full_server_conf_parses_every_statement_in_order() {
             Statement::Server(_) => "server",
             Statement::View(_) => "view",
             Statement::Zone(_) => "zone",
+            Statement::DnssecPolicy(_) => "dnssec-policy",
             Statement::Unknown { .. } => "unknown",
         })
         .collect();
@@ -229,8 +230,8 @@ fn full_server_conf_top_level_and_view_zones() {
 fn unmodelled_block_statement_is_preserved_and_parsing_continues() {
     let conf = parse_named_conf(
         r#"
-        dnssec-policy "standard" {
-            keys { ksk lifetime unlimited algorithm ecdsa256; };
+        key-store "standard" {
+            directory "/var/lib/bind/keys";
         };
         logging { channel local { syslog local3; }; };
         "#,
@@ -239,7 +240,7 @@ fn unmodelled_block_statement_is_preserved_and_parsing_continues() {
     let Statement::Unknown { keyword, raw } = &conf.statements[0] else {
         panic!("expected Unknown");
     };
-    assert_eq!(keyword, "dnssec-policy");
+    assert_eq!(keyword, "key-store");
     assert!(raw.starts_with("\"standard\" {"));
     assert!(raw.ends_with('}'));
     let Statement::Logging(l) = &conf.statements[1] else {

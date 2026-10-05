@@ -9,6 +9,18 @@
 hornet-bind9 = "0.2"
 ```
 
+### Library only (no CLI dependencies)
+
+The default `cli` feature builds the `hornet` binary and pulls in `clap` and miette's
+graphical renderer. A program that only uses the library can leave it out:
+
+```toml
+[dependencies]
+hornet-bind9 = { version = "0.3", default-features = false }
+```
+
+That build depends on `winnow`, `thiserror` and `miette` (without `fancy`) only.
+
 ### With serde support
 
 ```toml

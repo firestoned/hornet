@@ -17,6 +17,11 @@ pub struct NamedConf {
 }
 
 /// Any top-level directive that can appear in `named.conf`.
+///
+/// `Options` is much larger than the other variants. It stays unboxed so the
+/// AST can be built and matched with plain struct and enum syntax; a config
+/// holds few statements, so the size difference costs little.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     /// `options { … };`
@@ -39,6 +44,8 @@ pub enum Statement {
     Primaries(PrimariesStmt),
     /// `server addr { … };`
     Server(ServerStmt),
+    /// `dnssec-policy "name" { … };`
+    DnssecPolicy(DnssecPolicyStmt),
     /// Any unrecognised top-level block, preserved verbatim.
     ///
     /// Raw carrier: written back verbatim. Trusted input only; untrusted text
@@ -127,6 +134,13 @@ pub struct OptionsBlock {
 
     pub dnssec_enable: Option<bool>,
     pub dnssec_validation: Option<DnssecValidation>,
+    /// Global `dnssec-policy` (a policy name, or `default` / `insecure` /
+    /// `none`), inherited by every zone that does not set its own.
+    pub dnssec_policy: Option<String>,
+    /// Global `key-directory`: where DNSSEC keys are kept.
+    pub key_directory: Option<String>,
+    /// `allow-new-zones`: accept zones added at runtime with `rndc addzone`.
+    pub allow_new_zones: Option<bool>,
 
     pub max_cache_size: Option<SizeSpec>,
     pub max_cache_ttl: Option<u32>,
@@ -385,10 +399,37 @@ pub struct LogChannel {
     pub name: String,
     pub destination: LogDestination,
     pub severity: Option<LogSeverity>,
-    pub print_time: Option<bool>,
+    pub print_time: Option<PrintTime>,
     pub print_severity: Option<bool>,
     pub print_category: Option<bool>,
     pub buffered: Option<bool>,
+}
+
+/// `print-time` value of a logging channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintTime {
+    /// `yes`: local time in BIND's default format.
+    Yes,
+    /// `no`: no timestamp.
+    No,
+    /// `local`: local time (BIND 9.16 and later).
+    Local,
+    /// `iso8601`: local time in ISO 8601 format (BIND 9.16 and later).
+    Iso8601,
+    /// `iso8601-utc`: UTC in ISO 8601 format (BIND 9.16 and later).
+    Iso8601Utc,
+}
+
+impl std::fmt::Display for PrintTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PrintTime::Yes => "yes",
+            PrintTime::No => "no",
+            PrintTime::Local => "local",
+            PrintTime::Iso8601 => "iso8601",
+            PrintTime::Iso8601Utc => "iso8601-utc",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -530,6 +571,224 @@ pub struct ServerOptions {
 pub enum TransferFormat {
     OneAnswer,
     ManyAnswers,
+}
+
+// ── DNSSEC policy ─────────────────────────────────────────────────────────────
+
+/// Policy names BIND reserves for its built-in policies. A zone may name them
+/// without defining them; a `dnssec-policy` statement may not use them.
+pub const BUILTIN_DNSSEC_POLICIES: [&str; 3] = ["default", "insecure", "none"];
+
+/// `dnssec-policy "name" { … };` (BIND 9.18 and 9.20 grammar, ADR-0004).
+///
+/// Every duration field holds a BIND duration token as written (see
+/// [`is_duration`]): `named-checkconf -p` prints a TTL value in seconds but an
+/// ISO 8601 duration as written, so hornet keeps the text rather than a number.
+/// Clauses marked "9.20" are rejected by BIND 9.18.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DnssecPolicyStmt {
+    /// Policy name (not `default`, `insecure` or `none`).
+    pub name: String,
+    /// `keys { … };`. `None` is no `keys` clause; `Some(vec![])` is `keys { };`.
+    pub keys: Option<Vec<DnssecPolicyKey>>,
+    /// `cdnskey` (9.20).
+    pub cdnskey: Option<bool>,
+    /// `cds-digest-types { … };` (9.20): digest numbers or names.
+    pub cds_digest_types: Option<Vec<String>>,
+    /// `dnskey-ttl`.
+    pub dnskey_ttl: Option<String>,
+    /// `inline-signing` (9.20).
+    pub inline_signing: Option<bool>,
+    /// `manual-mode` (9.20).
+    pub manual_mode: Option<bool>,
+    /// `max-zone-ttl`.
+    pub max_zone_ttl: Option<String>,
+    /// `nsec3param …;`. `None` means the policy uses NSEC.
+    pub nsec3param: Option<Nsec3Param>,
+    /// `offline-ksk` (9.20).
+    pub offline_ksk: Option<bool>,
+    /// `parent-ds-ttl`.
+    pub parent_ds_ttl: Option<String>,
+    /// `parent-propagation-delay`.
+    pub parent_propagation_delay: Option<String>,
+    /// `publish-safety`.
+    pub publish_safety: Option<String>,
+    /// `purge-keys`.
+    pub purge_keys: Option<String>,
+    /// `retire-safety`.
+    pub retire_safety: Option<String>,
+    /// `signatures-jitter`.
+    pub signatures_jitter: Option<String>,
+    /// `signatures-refresh`.
+    pub signatures_refresh: Option<String>,
+    /// `signatures-validity`.
+    pub signatures_validity: Option<String>,
+    /// `signatures-validity-dnskey`.
+    pub signatures_validity_dnskey: Option<String>,
+    /// `zone-propagation-delay`.
+    pub zone_propagation_delay: Option<String>,
+    /// Clauses not modelled, and modelled clauses whose value is outside the
+    /// typed grammar, as raw key/value pairs.
+    ///
+    /// Raw carrier: written back verbatim. Trusted input only; untrusted text
+    /// here can inject arbitrary configuration.
+    pub extra: Vec<(String, String)>,
+}
+
+/// One entry of a policy's `keys { … }` clause:
+/// `role [key-directory | key-store "name"] lifetime L algorithm A [tag-range MIN MAX] [BITS];`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DnssecPolicyKey {
+    pub role: DnssecKeyRole,
+    /// Where the key is kept; `None` uses the zone's `key-directory`.
+    pub storage: Option<DnssecKeyStorage>,
+    pub lifetime: DnssecKeyLifetime,
+    /// Algorithm mnemonic (`ECDSAP256SHA256`, `ecdsa256`, …) or number (`13`).
+    /// BIND accepts it only unquoted.
+    pub algorithm: String,
+    /// `tag-range <min> <max>` (9.20).
+    pub tag_range: Option<(u16, u16)>,
+    /// Key size in bits.
+    pub bits: Option<u32>,
+}
+
+/// Role of a key in a DNSSEC policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnssecKeyRole {
+    /// Combined signing key: signs both the DNSKEY set and the zone.
+    Csk,
+    /// Key-signing key.
+    Ksk,
+    /// Zone-signing key.
+    Zsk,
+}
+
+impl std::fmt::Display for DnssecKeyRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            DnssecKeyRole::Csk => "csk",
+            DnssecKeyRole::Ksk => "ksk",
+            DnssecKeyRole::Zsk => "zsk",
+        })
+    }
+}
+
+/// Where a policy key is stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DnssecKeyStorage {
+    /// `key-directory`: the zone's key directory.
+    KeyDirectory,
+    /// `key-store "name"` (9.20).
+    KeyStore(String),
+}
+
+/// Lifetime of a policy key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DnssecKeyLifetime {
+    /// `unlimited`: the key never rolls.
+    Unlimited,
+    /// A BIND duration token (see [`is_duration`]).
+    Duration(String),
+}
+
+/// `nsec3param [iterations N] [optout yes|no] [salt-length N];`
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Nsec3Param {
+    pub iterations: Option<u32>,
+    pub optout: Option<bool>,
+    pub salt_length: Option<u32>,
+}
+
+/// TTL-value units and their length in seconds (BIND's `dns_ttl_fromtext`).
+const TTL_UNITS: [(char, u64); 5] = [
+    ('w', 604_800),
+    ('d', 86_400),
+    ('h', 3_600),
+    ('m', 60),
+    ('s', 1),
+];
+/// ISO 8601 date designators, in the order they must appear.
+const ISO8601_DATE_DESIGNATORS: [char; 3] = ['y', 'm', 'd'];
+/// ISO 8601 time designators (after `T`), in the order they must appear.
+const ISO8601_TIME_DESIGNATORS: [char; 3] = ['h', 'm', 's'];
+
+/// True when `s` is a duration BIND9 accepts in a `dnssec-policy`.
+///
+/// Either an ISO 8601 duration (case-insensitive `P[nY][nM][nD][T[nH][nM][nS]]`,
+/// or `PnW` on its own), or a TTL value: plain seconds, or digits with `w`,
+/// `d`, `h`, `m`, `s` units (case-insensitive), at most 2^32-1 seconds. There
+/// is no `y` TTL unit: one year is `P1Y`. Checked against `named-checkconf` on
+/// BIND 9.18 and 9.20 (ADR-0004).
+#[must_use]
+pub fn is_duration(s: &str) -> bool {
+    match s.strip_prefix(['P', 'p']) {
+        Some(rest) => is_iso8601_duration(rest),
+        None => is_ttl_value(s),
+    }
+}
+
+/// TTL value: digits, or one or more digit runs each followed by a unit.
+fn is_ttl_value(s: &str) -> bool {
+    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+        return s.parse::<u32>().is_ok();
+    }
+    let mut total: u64 = 0;
+    let mut rest = s;
+    while !rest.is_empty() {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let Ok(n) = rest[..digits].parse::<u64>() else {
+            return false;
+        };
+        let unit = rest[digits..]
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_lowercase());
+        let Some(&(_, secs)) = TTL_UNITS.iter().find(|(u, _)| Some(*u) == unit) else {
+            return false;
+        };
+        let Some(next) = n.checked_mul(secs).and_then(|v| total.checked_add(v)) else {
+            return false;
+        };
+        total = next;
+        rest = &rest[digits + 1..];
+    }
+    !s.is_empty() && u32::try_from(total).is_ok()
+}
+
+/// The part of an ISO 8601 duration after the `P`.
+fn is_iso8601_duration(rest: &str) -> bool {
+    if let Some(weeks) = rest.strip_suffix(['W', 'w']) {
+        return !weeks.is_empty() && weeks.bytes().all(|b| b.is_ascii_digit());
+    }
+    let (date, time) = match rest.find(['T', 't']) {
+        Some(at) => (&rest[..at], Some(&rest[at + 1..])),
+        None => (rest, None),
+    };
+    designated_parts(date, &ISO8601_DATE_DESIGNATORS)
+        && time.map_or(true, |t| designated_parts(t, &ISO8601_TIME_DESIGNATORS))
+}
+
+/// Zero or more `<digits><designator>` parts, designators in `order` and each
+/// used at most once.
+fn designated_parts(s: &str, order: &[char]) -> bool {
+    let mut next = 0;
+    let mut rest = s;
+    while !rest.is_empty() {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let designator = rest[digits..]
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_lowercase());
+        let Some(pos) = order[next..].iter().position(|d| Some(*d) == designator) else {
+            return false;
+        };
+        if digits == 0 {
+            return false;
+        }
+        next += pos + 1;
+        rest = &rest[digits + 1..];
+    }
+    true
 }
 
 #[cfg(test)]

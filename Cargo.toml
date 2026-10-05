@@ -25,13 +25,15 @@ required-features = ["cli"]
 
 [features]
 default = ["cli"]
-cli     = ["dep:clap"]
+# `miette/fancy` (graphical diagnostics) only for the CLI: library consumers do
+# not compile the terminal rendering stack (ADR-0004).
+cli     = ["dep:clap", "miette/fancy"]
 serde   = ["dep:serde"]
 
 [dependencies]
 winnow    = "0.6"
 thiserror = "1"
-miette    = { version = "7", features = ["fancy"] }
+miette    = "7"
 clap      = { version = "=4.4.18", features = ["derive", "color"], optional = true }
 serde     = { version = "1", features = ["derive"], optional = true }
 

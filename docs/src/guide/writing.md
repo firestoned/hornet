@@ -106,6 +106,10 @@ its typed options, not only the common ones. This includes, among others:
   `send-cookie`, `edns`, `edns-version`, `request-nsid`
 - **primaries:** the per-server `tls` name
 - **controls:** `unix` channels and `read-only` on both `inet` and `unix`
+- **options** (since 0.3.0): `allow-new-zones`, `key-directory`, `dnssec-policy`
+- **logging:** `print-time` with `yes`, `no`, `local`, `iso8601`, `iso8601-utc`
+- **dnssec-policy** (since 0.3.0): every clause of the BIND 9.18 and 9.20 grammar; see
+  [`DnssecPolicyStmt`](../reference/named-conf-constructs.md#dnssecpolicystmt)
 
 The `-v6` spelling of the source options is chosen from the address family of the stored
 address. A `unix` control's `perm` is written in decimal (`perm 384` for `0600`), the
@@ -135,9 +139,11 @@ The writer stays infallible: `write_named_conf` and `write_zone_file` still retu
 
 | Position | Examples | Treatment |
 |---|---|---|
-| String | file paths, key names, secrets, view names in `in-view`, update-policy identities, `tls` names, `unix` control paths | Always quoted; `"` and `\` are backslash-escaped |
+| String | file paths, key names, secrets, view names in `in-view`, update-policy identities, `tls` names, `unix` control paths, `dnssec-policy` names (statement and option), `key-store` names, `cds-digest-types` entries, `key-directory` | Always quoted; `"` and `\` are backslash-escaped |
 | Name or keyword | ACL references, key `algorithm`, record types in update-policy | Bare only when the value is a plain name (an ASCII letter, then letters, digits, `-`, `_`, `.`) and, for ACL references, not a reserved word; otherwise quoted and escaped |
 | Unquoted-only | RPZ `policy`, update-policy name type | Same rule; an unsafe value is quoted, and BIND9 rejects the file ("expected unquoted string") instead of reading injected text |
+| DNSSEC algorithm | `dnssec-policy` key `algorithm` | Bare when ASCII letters and digits only (`ECDSAP256SHA256`, `13`); otherwise quoted, which BIND9 rejects ("expected unquoted string") |
+| Duration | every `dnssec-policy` duration and key lifetime | Bare when [`is_duration`](../reference/named-conf-constructs.md#durations) accepts it; otherwise quoted, which BIND9 rejects ("expected ISO 8601 duration or TTL value") |
 
 The reserved words for ACL references are `any`, `none`, `localhost`, `localnets` and
 `key` (compared case-insensitively). An `AddressMatchElement::AclRef("any")` is therefore
