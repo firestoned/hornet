@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Semantic validation of parsed BIND9 configuration.
 //!
 //! Call [`validate_named_conf`] or [`validate_zone_file`] to get a list of

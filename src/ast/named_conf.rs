@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! AST types for BIND9 `named.conf` configuration files.
 //!
 //! The top-level entry point is [`NamedConf`], which holds a list of

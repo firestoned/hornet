@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Common parser primitives shared by both named.conf and zone file parsers.
 
 use winnow::{

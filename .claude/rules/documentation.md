@@ -17,7 +17,28 @@ Applies to: code changes, API changes, configuration changes, architecture chang
    - `docs/src/concepts/architecture.md` — if module structure changed
    - `docs/src/reference/` — if AST types, error types, or WriteOptions changed
    - `README.md` — if getting-started steps or features table changed
+   - `.github/community/NN-*.md` **and** `ROADMAPS.md`: if the work advanced a roadmap item
+   - `docs/src/security/threat-model.md`: full pass if an ADR was implemented (ADD final step)
 3. **Verify:** read docs as a new user, run `build-docs` skill
+
+---
+
+## Roadmaps: update both artefacts
+
+If the work advanced a roadmap item, update both, in the same commit:
+
+1. the detail doc, `.github/community/NN-*.md`: tick the checkbox or update the
+   phase-table row, and say what actually landed;
+2. `ROADMAPS.md` at the repo root: the status board row.
+
+The detail doc is the task list you work from; `ROADMAPS.md` is the one-screen
+answer to "what state is this project in". The trigger is **completion, not
+change**: if a checkbox is true now, tick it now, even when an earlier session
+did the work. While in the detail doc, audit the rest of it against the tree.
+
+New roadmaps take the next number at the end of their section in
+`.github/community/README.md` (zero-padded, contiguous from `00`, lowercase
+hyphenated filenames) and get a row in both index tables.
 
 ---
 
@@ -118,3 +139,5 @@ pub fn parse_named_conf(input: &str) -> Result<NamedConf> {
 - [ ] All affected `docs/src/` pages updated
 - [ ] `make docs` succeeds
 - [ ] Architecture diagrams updated if module structure changed
+- [ ] Roadmap detail doc and `ROADMAPS.md` updated if a roadmap item moved
+- [ ] Threat-model pass done and stamp bumped if an ADR was implemented

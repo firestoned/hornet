@@ -1,0 +1,591 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: Apache-2.0
+#
+# Single "Build" workflow for pull requests, pushes to main, and releases,
+# consolidating the former pr.yml, main.yaml and release.yml (same pattern as
+# firestoned/bindy and firestoned/bindcar). Jobs are gated by
+# `github.event_name`:
+#
+#   - pull_request : changes filter + lint (format/clippy) + build (Linux,
+#                    tests run in the x86_64 leg) + build-extras (macOS and
+#                    Windows) + SBOM + coverage + bench-compile + security +
+#                    "PR Checks Passed" aggregate gate
+#   - push (main)  : build (Linux, no tests: already tested on the PR) +
+#                    SBOM + coverage + security
+#   - release      : build (all 5 platforms, no tests) + SBOM + sign
+#                    binaries + SLSA provenance + release assets + security +
+#                    publish to crates.io
+#
+# Build-once principle: binaries are compiled exactly once per platform in the
+# `build` / `build-extras` jobs and flow to every consumer as artifacts. Tests
+# run as a step inside the x86_64 build leg (same profile and target as the
+# release build, so the dependency graph compiles exactly once) and only on
+# pull requests.
+#
+# The version comes from Cargo.toml: a release tag must match it; the
+# workflow never rewrites it.
+#
+# Documentation builds live in docs.yaml; the BIND9 round-trip gate lives in
+# e2e.yaml (also called by dependabot-auto-merge.yaml); benchmarks live in
+# bench.yaml.
+
+name: Build
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+# Least-privilege by default; jobs that sign, upload SARIF, or upload release
+# assets escalate at the job level.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+
+  # ── PR-only: paths filter ─────────────────────────────────────────────────
+  changes:
+    name: Detect Changed Files
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check for changes
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'benches/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Makefile'
+              - '.github/workflows/build.yaml'
+
+  # ── Always ────────────────────────────────────────────────────────────────
+  license-check:
+    name: Verify SPDX License Headers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check license headers
+        uses: firestoned/github-actions/security/license-check@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          copyright-holder: "Erick Bourgeois, firestoned"
+          license-id: "Apache-2.0"
+
+  verify-commits:
+    name: Verify Signed Commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0  # Fetch all history for verification
+
+      - name: Verify commits are signed
+        uses: firestoned/github-actions/security/verify-signed-commits@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # pr on pull_request, release on a published release, push otherwise.
+          verify-mode: ${{ github.event_name == 'pull_request' && 'pr' || github.event_name == 'release' && 'release' || 'push' }}
+          base-ref: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+
+  # ── PR-only lint ──────────────────────────────────────────────────────────
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [license-check, verify-commits]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: make fmt-check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: format
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+
+      - name: Run clippy
+        run: make clippy
+
+  # ── Version metadata (always) ─────────────────────────────────────────────
+  # The version is read from Cargo.toml (the source of truth); on a release
+  # the tag must agree with it, or the release fails here rather than shipping
+  # a crate whose version disagrees with its tag.
+  extract-version:
+    name: Extract Version Information
+    runs-on: ubuntu-latest
+    needs: [license-check, verify-commits]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      short-sha: ${{ steps.version.outputs.short-sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Extract version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: make version-info >> "$GITHUB_OUTPUT"
+
+  # ── Build binaries ONCE (always; Linux) ───────────────────────────────────
+  build:
+    name: Build - ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
+    needs: [extract-version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: hornet-linux-amd64
+            binary_name: hornet
+          - name: Linux ARM64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: hornet-linux-arm64
+            binary_name: hornet
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Rust build environment
+        uses: firestoned/github-actions/rust/setup-rust-build@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          target: ${{ matrix.platform.target }}
+          cache-key: ${{ github.event_name == 'release' && format('release-{0}', needs.extract-version.outputs.version) || '' }}
+
+      - name: Build binary
+        uses: firestoned/github-actions/rust/build-binary@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          binary-name: hornet
+          target: ${{ matrix.platform.target }}
+
+      # Run tests in the SAME profile and target as the release build above,
+      # so every dependency rlib is reused. x86_64 leg only: aarch64 test
+      # binaries are cross-compiled and cannot execute on the x86_64 runner.
+      # Skipped on main merges and releases: the code was tested on the PR.
+      - name: Run tests (release profile, PR only)
+        if: >-
+          matrix.platform.target == 'x86_64-unknown-linux-gnu' &&
+          github.event_name != 'push' &&
+          github.event_name != 'release'
+        run: make test-release TARGET=${{ matrix.platform.target }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.platform.artifact_name }}
+          path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
+          retention-days: ${{ github.event_name == 'release' && 90 || 1 }}
+          if-no-files-found: error
+
+  # ── macOS / Windows (PR: does it build; release: shipped binaries) ────────
+  build-extras:
+    name: Build - ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
+    if: github.event_name == 'pull_request' || github.event_name == 'release'
+    needs: [extract-version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: hornet-macos-amd64
+            binary_name: hornet
+          - name: macOS ARM64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: hornet-macos-arm64
+            binary_name: hornet
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: hornet-windows-amd64
+            binary_name: hornet.exe
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      # macos-latest is ARM64; x86_64-apple-darwin requires explicit target addition
+      - name: Add x86_64 target for cross-compilation (macOS)
+        if: matrix.platform.target == 'x86_64-apple-darwin'
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+
+      - name: Build binary
+        shell: bash
+        run: make build-target TARGET=${{ matrix.platform.target }}
+
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.platform.artifact_name }}
+          path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
+          retention-days: ${{ github.event_name == 'release' && 90 || 1 }}
+          if-no-files-found: error
+
+  # ── SBOM per shipped binary ───────────────────────────────────────────────
+  # cargo-cyclonedx resolves the dependency tree for a target triple from
+  # Cargo metadata alone, so every platform's SBOM is generated on Linux.
+  # PRs and main get the two Linux SBOMs; releases get all five.
+  sbom:
+    name: SBOM - ${{ matrix.platform.name }}
+    runs-on: ubuntu-latest
+    needs: [extract-version]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(github.event_name == 'release' && '[{"name":"Linux x86_64","target":"x86_64-unknown-linux-gnu","artifact_name":"hornet-linux-amd64"},{"name":"Linux ARM64","target":"aarch64-unknown-linux-gnu","artifact_name":"hornet-linux-arm64"},{"name":"macOS x86_64","target":"x86_64-apple-darwin","artifact_name":"hornet-macos-amd64"},{"name":"macOS ARM64","target":"aarch64-apple-darwin","artifact_name":"hornet-macos-arm64"},{"name":"Windows x86_64","target":"x86_64-pc-windows-msvc","artifact_name":"hornet-windows-amd64"}]' || '[{"name":"Linux x86_64","target":"x86_64-unknown-linux-gnu","artifact_name":"hornet-linux-amd64"},{"name":"Linux ARM64","target":"aarch64-unknown-linux-gnu","artifact_name":"hornet-linux-arm64"}]') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Generate SBOM
+        uses: firestoned/github-actions/rust/generate-sbom@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        with:
+          package: hornet-bind9
+          target: ${{ matrix.platform.target }}
+          spec-version: '1.5'
+          cyclonedx-version: '0.5.9'
+
+      - name: Stage the SBOM
+        run: make sbom-stage SBOM_NAME=${{ matrix.platform.artifact_name }}
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sbom-${{ matrix.platform.artifact_name }}
+          path: sbom/${{ matrix.platform.artifact_name }}.cdx.json
+          retention-days: ${{ github.event_name == 'release' && 90 || 1 }}
+          if-no-files-found: error
+
+  # ── Coverage (PR and main) ────────────────────────────────────────────────
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    if: github.event_name != 'release'
+    needs: [license-check, verify-commits]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Generate coverage report
+        run: make coverage-lcov
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Generate HTML coverage report
+        run: make coverage-html
+
+      - name: Upload HTML coverage as artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: target/llvm-cov/html/
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  # ── Benchmarks compile (PR only; bench.yaml runs them) ────────────────────
+  bench-compile:
+    name: Compile Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: format
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+
+      - name: Compile benchmarks (no run)
+        run: make bench-compile
+
+  # ── Security scan (always) ────────────────────────────────────────────────
+  security:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: [license-check, verify-commits]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        if: github.event_name == 'pull_request'
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache cargo registry
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      - name: Run cargo-audit (RustSec advisory scan)
+        uses: firestoned/github-actions/rust/security-scan@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          cargo-audit-version: "0.22.0"
+          upload-artifact-name: cargo-audit-report-${{ github.event_name == 'release' && 'release' || github.event_name == 'push' && 'main' || 'pr' }}
+
+      - name: Run cargo-deny (advisories, licenses, bans, sources)
+        if: github.event_name == 'pull_request'
+        run: make cargo-deny
+
+  # ── Aggregate PR gate ─────────────────────────────────────────────────────
+  # Single stable status-check context ("PR Checks Passed") for the branch
+  # ruleset, so required checks don't track individual (matrix) job names.
+  # `always()` makes it run even when an upstream job is skipped. It passes
+  # when every dependency either succeeded or was skipped, and fails only when
+  # one genuinely failed or was cancelled.
+  # DO NOT rename this job: the "main" ruleset requires the exact context
+  # "PR Checks Passed" (and "Verify Signed Commits").
+  ci-gate:
+    name: PR Checks Passed
+    runs-on: ubuntu-latest
+    needs: [changes, license-check, verify-commits, format, clippy, build, build-extras, sbom, coverage, bench-compile, security]
+    if: always()
+    steps:
+      - name: Fail if any required PR check failed or was cancelled
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "One or more required PR checks did not pass: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+
+  # ══ Release-only jobs ═════════════════════════════════════════════════════
+
+  sign-artifacts:
+    name: Sign Binary Artifacts - ${{ matrix.platform.name }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs: [build, build-extras, sbom, extract-version]
+    permissions:
+      contents: read
+      id-token: write      # keyless Cosign signing and SBOM attestation
+      attestations: write  # SBOM attestation
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux x86_64
+            artifact_name: hornet-linux-amd64
+            binary_name: hornet
+          - name: Linux ARM64
+            artifact_name: hornet-linux-arm64
+            binary_name: hornet
+          - name: macOS x86_64
+            artifact_name: hornet-macos-amd64
+            binary_name: hornet
+          - name: macOS ARM64
+            artifact_name: hornet-macos-arm64
+            binary_name: hornet
+          - name: Windows x86_64
+            artifact_name: hornet-windows-amd64
+            binary_name: hornet.exe
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ matrix.platform.artifact_name }}
+          path: ./artifacts/${{ matrix.platform.artifact_name }}
+
+      - name: Create tarball for signing
+        run: make release-tarball DIR=artifacts/${{ matrix.platform.artifact_name }} NAME=${{ matrix.platform.artifact_name }} BINARY=${{ matrix.platform.binary_name }}
+
+      - name: Sign binary tarball with Cosign
+        uses: firestoned/github-actions/security/cosign-sign@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          artifact-path: artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
+
+      - name: Download binary SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: sbom-${{ matrix.platform.artifact_name }}
+          path: ./sbom
+
+      # Bind the SBOM to the exact tarball users download.
+      - name: Attest binary SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
+          sbom-path: sbom/${{ matrix.platform.artifact_name }}.cdx.json
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.platform.artifact_name }}-signed
+          path: |
+            artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
+            artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz.bundle
+
+  generate-provenance-subjects:
+    name: Generate SLSA Provenance Subjects
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    # Subjects are every built release file: tarballs and SBOMs. Signature
+    # bundles are signatures, not subjects.
+    needs: [sign-artifacts, sbom, extract-version]
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download signed tarballs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: hornet-*-signed
+          path: ./subjects
+          merge-multiple: true
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: sbom-*
+          path: ./subjects
+          merge-multiple: true
+
+      - name: Generate hashes for SLSA provenance
+        id: hash
+        run: |
+          make provenance-subjects DIR=subjects OUT=subjects.b64
+          echo "hashes=$(cat subjects.b64)" >> "$GITHUB_OUTPUT"
+
+  slsa-provenance:
+    name: Generate SLSA Provenance
+    if: github.event_name == 'release'
+    needs: [generate-provenance-subjects, extract-version]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.generate-provenance-subjects.outputs.hashes }}"
+      upload-assets: true
+      provenance-name: "${{ needs.extract-version.outputs.version }}.intoto.jsonl"
+
+  upload-release-assets:
+    name: Upload Release Assets
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs: [build, build-extras, sbom, sign-artifacts, slsa-provenance]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: ./artifacts
+
+      - name: Organize release artifacts
+        run: make release-assets DIR=artifacts
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          files: |
+            artifacts/release/*.tar.gz
+            artifacts/sboms/*.cdx.json
+            artifacts/signatures/*.bundle
+            artifacts/provenance/*.intoto.jsonl
+            artifacts/release/checksums.sha256
+
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs: [extract-version, build, build-extras, security, upload-release-assets]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: make publish

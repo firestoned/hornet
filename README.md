@@ -2,7 +2,7 @@
 
 ### Project Status
 
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Crates.io](https://img.shields.io/crates/v/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
 [![Crates.io Downloads](https://img.shields.io/crates/d/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
 [![docs.rs](https://docs.rs/hornet-bind9/badge.svg)](https://docs.rs/hornet-bind9)
@@ -307,4 +307,4 @@ When adding support for a new statement or record type:
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).

@@ -94,7 +94,7 @@ make fmt-check
 make clippy
 ```
 
-Hornet enforces pedantic clippy with `module_name_repetitions` allowed. Fix all warnings
+Hornet enforces pedantic clippy with `module_name_repetitions` and `assert_is_empty` allowed. Fix all warnings
 before opening a PR.
 
 ---
@@ -131,12 +131,16 @@ hornet/
 │   └── main.rs             # CLI binary (cli feature)
 ├── tests/                  # Integration tests
 │   ├── named_conf.rs
-│   └── zone_file.rs
+│   ├── zone_file.rs
+│   └── e2e/                # BIND9 round-trip suite (run.sh, fixtures, known failures)
 ├── docs/                   # MkDocs documentation
 │   ├── mkdocs.yml
+│   ├── adr/                # Architecture Decision Records
 │   └── src/
+├── ROADMAPS.md             # Roadmap status board
 └── .github/
-    └── workflows/
+    ├── community/          # Roadmap detail docs (NN-title.md)
+    └── workflows/          # build.yaml, e2e.yaml, docs.yaml, ...
 ```
 
 ---

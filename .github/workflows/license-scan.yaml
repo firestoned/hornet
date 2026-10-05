@@ -1,0 +1,104 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: Apache-2.0
+
+name: License Compliance Scan
+
+on:
+  # Reusable workflow - can be called by other workflows
+  workflow_call:
+    outputs:
+      compliant:
+        description: 'Whether all dependency licenses are compliant'
+        value: ${{ jobs.scan.outputs.compliant }}
+
+  # Scheduled scan - weekly on Monday at 9 AM UTC
+  schedule:
+    - cron: '0 9 * * 1'
+
+  # Run on pull requests when dependencies change
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/deny.toml'
+      - '.github/workflows/license-scan.yaml'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  scan:
+    name: Dependency License Compliance
+    runs-on: ubuntu-latest
+    outputs:
+      compliant: ${{ steps.check.outputs.compliant }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      - name: Run license compliance check
+        id: check
+        run: |
+          if make license-check; then
+            echo "compliant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "compliant=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Generate license report
+        if: always()
+        run: make license-report
+
+      - name: Upload license report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: license-report-${{ github.run_number }}
+          path: licenses.json
+          retention-days: 30
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Dependency License Compliance" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M UTC")" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f licenses.json ]; then
+            TOTAL=$(jq 'length' licenses.json 2>/dev/null || echo "0")
+            echo "**Total dependencies scanned:** $TOTAL" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### License Breakdown" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            jq -r '.[].license // "Unknown"' licenses.json 2>/dev/null | sort | uniq -c | sort -rn >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.check.outputs.compliant }}" = "true" ]; then
+            echo "✅ **All dependency licenses are compliant**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ **Prohibited license(s) detected; see job output for details**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+          echo "Policy: [cargo-deny configuration](.cargo/deny.toml)" >> "$GITHUB_STEP_SUMMARY"

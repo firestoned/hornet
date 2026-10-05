@@ -4,6 +4,15 @@ All notable changes to Hornet are documented here.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **License changed from MIT to Apache-2.0.** The `LICENSE` file, SPDX headers,
+  `Cargo.toml` and docs now say Apache-2.0, and a `NOTICE` file is included.
+
+---
+
 ## [0.1.0] — Initial release
 
 ### Added

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Serialise the AST back to valid BIND9 configuration text.
 //!
 //! The [`WriteOptions`] struct controls formatting behaviour (indent size,

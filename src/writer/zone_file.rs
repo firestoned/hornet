@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Serialise a [`ZoneFile`] AST to text.
 
 use super::WriteOptions;

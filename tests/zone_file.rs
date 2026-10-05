@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Integration tests for zone file parsing, writing, and validation.
 
 use hornet_bind9::ast::zone_file::*;
