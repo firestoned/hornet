@@ -1,8 +1,8 @@
 # Threat Model
 
 **Last Updated:** 2026-10-05
-**Version:** 1.0
-**Last full pass 2026-10-05, against ADR-0001**
+**Version:** 1.1
+**Last full pass 2026-10-05, against ADR-0001 ... ADR-0002**
 
 This is hornet's threat model: what it protects, who can reach it, where the
 trust boundaries are, and which control (or accepted risk, or open finding)
@@ -96,7 +96,7 @@ flowchart LR
 | T6 | **I**nformation disclosure / **E**levation | `include` or `$INCLUDE` makes hornet read files outside the intended tree (path traversal) | TB1, TB4 | **Not exposed.** hornet never follows includes: `include "path";` becomes `Statement::Include(path)` and `$INCLUDE` becomes `Entry::Include { file, .. }`; neither is opened. The CLI reads only the path given on its command line. Consumers that resolve includes themselves own that check. |
 | T7 | **T**ampering | `fmt` / `convert --in-place` silently destroys content | TB4 | The parser does not preserve comments, so an in-place rewrite removes them (open finding, section 6). Writes are a plain `std::fs::write` (non-atomic, follows symlinks); acceptable for a user-invoked CLI, see **AR2**. |
 | T8 | **R**epudiation | A change to parser/writer behaviour lands without a record | TB5 | `.claude/CHANGELOG.md` entries with a mandatory `**Author:**`, signed and signed-off commits verified in CI (`verify-signed-commits`), ADRs for behaviour-changing decisions. |
-| T9 | **T**ampering | A compromised dependency or GitHub Action ships in a release | TB5 | Small dependency surface (`winnow`, `thiserror`, `miette`, optional `clap` / `serde`); `cargo audit` in CI; SPDX header check; Cosign-signed release tarballs, CycloneDX SBOMs and SLSA provenance; actions pinned by commit SHA and Dependabot-tracked (ADR-0001). |
+| T9 | **T**ampering | A compromised dependency or GitHub Action ships in a release | TB5 | Small dependency surface (`winnow`, `thiserror`, `miette`, optional `clap` / `serde`); `cargo audit` in CI; SPDX header check; Cosign-signed release tarballs, CycloneDX SBOMs and SLSA provenance; actions pinned by commit SHA and Dependabot-tracked (ADR-0001). Coverage tooling (ADR-0002) adds `cargo-llvm-cov` (installed by a SHA-pinned action) and a Codecov upload; neither affects what is built or released, and Codecov is a reporting sink, never a gate. |
 | T10 | **S**poofing | A forged hornet release or crate | TB5 | Cosign keyless signatures and SLSA provenance on GitHub release assets. crates.io publication relies on the `CARGO_REGISTRY_TOKEN` secret, scoped to the release job. |
 | T11 | **I**nformation disclosure | TSIG secrets in `key` statements leak via error output | TB1 | Low. Parse errors carry the source text in a `miette::NamedSource`; a caller that prints diagnostics for a file containing `secret "..."` can echo it. The validator does not log key material. Callers handling secrets should not forward diagnostics to shared logs. |
 
@@ -124,5 +124,12 @@ it lands. The STRIDE rows above that say "open finding" refer to these.
 - **CI:** composite actions from `firestoned/github-actions`; third-party
   actions pinned by commit SHA and updated by Dependabot, with auto-merge gated
   on the BIND9 e2e suite (ADR-0001, roadmap 01).
+- **Coverage reporting (ADR-0002):** coverage jobs upload LCOV to Codecov with
+  the `CODECOV_TOKEN` repository secret. The workflows trigger on
+  `pull_request`, not `pull_request_target`, so fork and Dependabot runs never
+  receive the token and upload tokenless. A leaked token could only falsify
+  Codecov's reports, which gate nothing: the 100% gate is `make coverage` in
+  hornet's own job. The instrumented e2e binary is a CI artefact only, never
+  released.
 - **Release:** signed commits verified, Cosign keyless signatures on binary
   tarballs, CycloneDX SBOM per binary, SLSA build provenance, checksums.

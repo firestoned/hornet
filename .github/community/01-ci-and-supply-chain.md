@@ -12,8 +12,9 @@
 > **Status:** 🔶 In progress (opened 2026-10-05). Design recorded in
 > [ADR-0001](../../docs/adr/0001-single-build-workflow-and-bind9-e2e-oracle.md).
 > Workflows landed 2026-10-05; e2e passes 16/16 checks on BIND 9.18.50 and
-> 9.20.29 with 7 known failures (three real hornet bugs, below). Open: branch
-> protection, the three bugs, and committing `Cargo.lock`.
+> 9.20.29 with 7 known failures (three real hornet bugs, below), all fixed the
+> same day; e2e now passes 56/56 on both. Open: branch protection and
+> committing `Cargo.lock`.
 
 ## Why
 
@@ -73,15 +74,15 @@ that BIND would reject passes CI.
 
 - [ ] Branch protection on `main` requires `PR Checks Passed` and `E2E gate`
       (repo setting, not code); enable "Allow auto-merge" for Dependabot
-- [ ] Writer: `controls { ... keys { "k" } }` is emitted without the `;` after
+- [x] Writer: `controls { ... keys { "k" } }` is emitted without the `;` after
       the last key, which `named-checkconf` rejects (`src/writer/named_conf.rs`)
-- [ ] Zone parser: the record after a single-line SOA is silently dropped
+- [x] Zone parser: the record after a single-line SOA is silently dropped
       (`src/parser/zone_file.rs`)
-- [ ] Zone parser: the record after a TXT record is silently dropped, which
+- [x] Zone parser: the record after a TXT record is silently dropped, which
       also makes `fmt` non-idempotent (`src/parser/zone_file.rs`)
 - [ ] Commit `Cargo.lock` (today gitignored) so CI builds are reproducible and
       can use `--locked` like bindy
 
-Each bug fix is TDD (failing unit test first) and deletes its lines from
-`tests/e2e/known-failures.txt`; the e2e run fails on an unexpected pass, so a
-fix that forgets this is caught.
+The three bugs were fixed test-first on 2026-10-05 under roadmap 02 (the two
+zone-parser drops shared one root cause, also behind drops after LOC, HTTPS,
+NSEC, unknown types and `$GENERATE`); `tests/e2e/known-failures.txt` is empty.

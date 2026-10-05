@@ -45,18 +45,32 @@ pub mod writer;
 pub use ast::{named_conf, zone_file};
 pub use error::{Error, Result, Severity, ValidationError};
 
+/// Source name used in diagnostics for input that did not come from a file.
+const INPUT_SOURCE_NAME: &str = "<input>";
+
+/// Run `parse` over `input`, mapping a parser failure to [`Error::Parse`]
+/// with `source_name` as both the reported file and the diagnostic source.
+#[allow(clippy::result_large_err)]
+fn parse_with<T>(
+    parse: fn(&str) -> std::result::Result<T, String>,
+    source_name: &str,
+    input: &str,
+) -> Result<T> {
+    parse(input).map_err(|message| Error::Parse {
+        file: source_name.to_owned(),
+        message,
+        src: miette::NamedSource::new(source_name, input.to_owned()),
+        span: (0, 0).into(),
+    })
+}
+
 /// Parse a `named.conf` string into an AST.
 ///
 /// # Errors
 /// Returns [`Error::Parse`] if the input is not valid BIND9 configuration.
 #[allow(clippy::result_large_err)]
 pub fn parse_named_conf(input: &str) -> Result<ast::named_conf::NamedConf> {
-    parser::parse_named_conf(input).map_err(|msg| Error::Parse {
-        file: "<input>".into(),
-        message: msg.clone(),
-        src: miette::NamedSource::new("<input>", input.to_owned()),
-        span: (0, 0).into(),
-    })
+    parse_with(parser::parse_named_conf, INPUT_SOURCE_NAME, input)
 }
 
 /// Parse a `named.conf` file from disk.
@@ -66,12 +80,11 @@ pub fn parse_named_conf(input: &str) -> Result<ast::named_conf::NamedConf> {
 #[allow(clippy::result_large_err)]
 pub fn parse_named_conf_file(path: &std::path::Path) -> Result<ast::named_conf::NamedConf> {
     let input = std::fs::read_to_string(path)?;
-    parser::parse_named_conf(&input).map_err(|msg| Error::Parse {
-        file: path.display().to_string(),
-        message: msg.clone(),
-        src: miette::NamedSource::new(path.display().to_string(), input),
-        span: (0, 0).into(),
-    })
+    parse_with(
+        parser::parse_named_conf,
+        &path.display().to_string(),
+        &input,
+    )
 }
 
 /// Parse a DNS zone file string into an AST.
@@ -80,12 +93,7 @@ pub fn parse_named_conf_file(path: &std::path::Path) -> Result<ast::named_conf::
 /// Returns [`Error::Parse`] if the input is not a valid zone file.
 #[allow(clippy::result_large_err)]
 pub fn parse_zone_file(input: &str) -> Result<ast::zone_file::ZoneFile> {
-    parser::parse_zone_file(input).map_err(|msg| Error::Parse {
-        file: "<input>".into(),
-        message: msg.clone(),
-        src: miette::NamedSource::new("<input>", input.to_owned()),
-        span: (0, 0).into(),
-    })
+    parse_with(parser::parse_zone_file, INPUT_SOURCE_NAME, input)
 }
 
 /// Parse a zone file from disk.
@@ -95,12 +103,7 @@ pub fn parse_zone_file(input: &str) -> Result<ast::zone_file::ZoneFile> {
 #[allow(clippy::result_large_err)]
 pub fn parse_zone_file_from_path(path: &std::path::Path) -> Result<ast::zone_file::ZoneFile> {
     let input = std::fs::read_to_string(path)?;
-    parser::parse_zone_file(&input).map_err(|msg| Error::Parse {
-        file: path.display().to_string(),
-        message: msg.clone(),
-        src: miette::NamedSource::new(path.display().to_string(), input),
-        span: (0, 0).into(),
-    })
+    parse_with(parser::parse_zone_file, &path.display().to_string(), &input)
 }
 
 /// Serialise a [`NamedConf`] AST back to a `String`.
@@ -126,3 +129,6 @@ pub fn validate_named_conf(conf: &ast::named_conf::NamedConf) -> Vec<ValidationE
 pub fn validate_zone_file(zone: &ast::zone_file::ZoneFile) -> Vec<ValidationError> {
     validator::validate_zone_file(zone)
 }
+
+#[cfg(test)]
+mod lib_tests;

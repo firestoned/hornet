@@ -45,9 +45,12 @@ enum Command {
         /// Indent size (default: 4)
         #[arg(short, long, default_value_t = 4)]
         indent: usize,
-        /// Use modern keyword aliases (primary/secondary instead of master/slave)
-        #[arg(long, default_value_t = true)]
+        /// Use modern keyword aliases (primary/secondary) [default]
+        #[arg(long, overrides_with = "no_modern")]
         modern: bool,
+        /// Keep legacy keywords (master/slave)
+        #[arg(long, overrides_with = "modern")]
+        no_modern: bool,
     },
     /// Parse a zone file and print the re-formatted output.
     #[command(visible_alias = "z")]
@@ -86,9 +89,12 @@ enum Command {
         /// Check formatting only; exit 1 if file would change
         #[arg(long)]
         check: bool,
-        /// Use modern keyword aliases
-        #[arg(long, default_value_t = true)]
+        /// Use modern keyword aliases [default]
+        #[arg(long, overrides_with = "no_modern")]
         modern: bool,
+        /// Keep legacy keywords
+        #[arg(long, overrides_with = "modern")]
+        no_modern: bool,
     },
     /// Convert legacy BIND8/9 keywords to modern equivalents.
     Convert {
@@ -120,11 +126,12 @@ fn run(cmd: Command) -> miette::Result<ExitCode> {
             file,
             indent,
             modern,
+            no_modern,
         } => {
             let conf = parse_named_conf_file(&file).into_diagnostic()?;
             let opts = WriteOptions {
                 indent,
-                modern_keywords: modern,
+                modern_keywords: use_modern_keywords(modern, no_modern),
                 ..Default::default()
             };
             print!("{}", write_named_conf(&conf, &opts));
@@ -152,12 +159,7 @@ fn run(cmd: Command) -> miette::Result<ExitCode> {
             let mut worst = Severity::Info;
             for d in &diags {
                 if d.severity >= min_sev {
-                    let prefix = match d.severity {
-                        Severity::Error => "\x1b[31merror\x1b[0m",
-                        Severity::Warning => "\x1b[33mwarning\x1b[0m",
-                        Severity::Info => "\x1b[36minfo\x1b[0m",
-                    };
-                    eprintln!("{prefix}: {}", d.message);
+                    eprintln!("{}: {}", severity_prefix(&d.severity), d.message);
                     if d.severity > worst {
                         worst = d.severity.clone();
                     }
@@ -185,22 +187,11 @@ fn run(cmd: Command) -> miette::Result<ExitCode> {
         } => {
             let zone = parse_zone_file_from_path(&file).into_diagnostic()?;
             let diags = validate_zone_file(&zone);
-            let mut has_error = false;
-            let mut has_warning = false;
             for d in &diags {
-                let prefix = match d.severity {
-                    Severity::Error => {
-                        has_error = true;
-                        "\x1b[31merror\x1b[0m"
-                    }
-                    Severity::Warning => {
-                        has_warning = true;
-                        "\x1b[33mwarning\x1b[0m"
-                    }
-                    Severity::Info => "\x1b[36minfo\x1b[0m",
-                };
-                eprintln!("{prefix}: {}", d.message);
+                eprintln!("{}: {}", severity_prefix(&d.severity), d.message);
             }
+            let has_error = diags.iter().any(|d| d.severity == Severity::Error);
+            let has_warning = diags.iter().any(|d| d.severity == Severity::Warning);
             if diags.is_empty() {
                 eprintln!("\x1b[32mOK\x1b[0m  {} — no issues found", file.display());
             }
@@ -216,12 +207,13 @@ fn run(cmd: Command) -> miette::Result<ExitCode> {
             indent,
             check,
             modern,
+            no_modern,
         } => {
             let original = std::fs::read_to_string(&file).into_diagnostic()?;
             let conf = parse_named_conf_file(&file).into_diagnostic()?;
             let opts = WriteOptions {
                 indent,
-                modern_keywords: modern,
+                modern_keywords: use_modern_keywords(modern, no_modern),
                 ..Default::default()
             };
             let formatted = write_named_conf(&conf, &opts);
@@ -258,6 +250,21 @@ fn run(cmd: Command) -> miette::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
+    }
+}
+
+/// Resolve the `--modern` / `--no-modern` pair. Modern keywords are the
+/// default; the two flags override each other, so the last one given wins.
+fn use_modern_keywords(modern: bool, no_modern: bool) -> bool {
+    modern || !no_modern
+}
+
+/// Coloured label printed before each diagnostic.
+fn severity_prefix(severity: &Severity) -> &'static str {
+    match severity {
+        Severity::Error => "\x1b[31merror\x1b[0m",
+        Severity::Warning => "\x1b[33mwarning\x1b[0m",
+        Severity::Info => "\x1b[36minfo\x1b[0m",
     }
 }
 

@@ -5,8 +5,9 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use winnow::{
-    ascii::digit1,
+    ascii::{digit1, space1},
     combinator::{alt, opt, preceded, repeat},
+    error::{ContextError, ErrMode},
     token::take_while,
     ModalResult, Parser,
 };
@@ -18,38 +19,93 @@ use crate::ast::zone_file::{
     ZoneFile,
 };
 
+const SECONDS_PER_MINUTE: u32 = 60;
+const SECONDS_PER_HOUR: u32 = 3_600;
+const SECONDS_PER_DAY: u32 = 86_400;
+const SECONDS_PER_WEEK: u32 = 604_800;
+/// A run of backslashes escapes the character after it when its length is odd.
+const ESCAPE_PAIR: usize = 2;
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 /// Parse a complete zone file from a string.
 ///
+/// The input is read as RFC 1035 logical lines: a parenthesised group may span
+/// physical lines, `;` starts a comment outside quoted strings, and a line that
+/// starts with whitespace inherits the previous owner name (`name: None`).
+/// Logical lines that cannot be parsed are skipped.
+///
 /// # Errors
-/// Returns an error string if the input is not valid zone file syntax.
+/// Does not currently return `Err`; the `Result` is part of the public API so
+/// that stricter parsing can report errors without a breaking change.
 pub fn parse_zone_file(input: &str) -> Result<ZoneFile, String> {
-    let mut s = input;
-    match zone_file_inner(&mut s) {
-        Ok(zf) => Ok(zf),
-        Err(e) => Err(format!("{e}")),
-    }
-}
-
-fn zone_file_inner(input: &mut &str) -> ModalResult<ZoneFile> {
+    let mut rest = input;
     let mut entries = Vec::new();
-    zws(input)?;
-    while !input.is_empty() {
-        let before = input.len();
-        if let Ok(entry) = zone_entry.parse_next(input) {
+    while let Some(line) = next_logical_line(&mut rest) {
+        if let Ok(entry) = zone_entry.parse_next(&mut line.as_str()) {
             entries.push(entry);
-        } else {
-            skip_line(input)?;
-        }
-        zws(input)?;
-        // Safety guard: if nothing was consumed, force-advance one char
-        if input.len() == before {
-            // strip one character to ensure progress
-            *input = &input[input.chars().next().map_or(1, char::len_utf8)..];
         }
     }
     Ok(ZoneFile { entries })
+}
+
+// ── Logical lines ──────────────────────────────────────────────────────────────
+
+/// Take the next non-blank logical line from `input`.
+///
+/// Physical lines are joined while a `(` opened outside a quoted string is
+/// still unclosed. Parentheses and `;` comments outside quoted strings are
+/// removed; quoted strings are kept verbatim. Leading whitespace is preserved
+/// because it is significant (owner-name inheritance). Lines that are empty or
+/// hold only a comment are skipped. Returns `None` at end of input.
+fn next_logical_line(input: &mut &str) -> Option<String> {
+    while !input.is_empty() {
+        let mut out = String::new();
+        let mut depth = 0usize;
+        let mut in_quotes = false;
+        let mut in_comment = false;
+        let mut prev_backslashes = 0usize;
+        let mut consumed = 0usize;
+        for c in input.chars() {
+            consumed += c.len_utf8();
+            if c == '\n' {
+                in_comment = false;
+                if depth == 0 {
+                    break;
+                }
+                out.push(' ');
+                continue;
+            }
+            let escaped = prev_backslashes % ESCAPE_PAIR != 0;
+            prev_backslashes = if c == '\\' { prev_backslashes + 1 } else { 0 };
+            if in_comment {
+                continue;
+            }
+            match c {
+                '"' if !escaped => in_quotes = !in_quotes,
+                ';' if !in_quotes => {
+                    in_comment = true;
+                    continue;
+                }
+                '(' if !in_quotes => {
+                    depth += 1;
+                    continue;
+                }
+                ')' if !in_quotes => {
+                    depth = depth.saturating_sub(1);
+                    continue;
+                }
+                _ => {}
+            }
+            out.push(c);
+        }
+        *input = &input[consumed..];
+        let content = out.trim_end();
+        if !content.is_empty() {
+            return Some(content.to_owned());
+        }
+    }
+    None
 }
 
 // ── Zone entries ───────────────────────────────────────────────────────────────
@@ -65,44 +121,26 @@ fn directive_entry(input: &mut &str) -> ModalResult<Entry> {
         .parse_next(input)?;
     ws(input)?;
     match name.as_str() {
-        "ORIGIN" => {
-            let n = dns_name(input)?;
-            skip_line(input)?;
-            Ok(Entry::Origin(n))
-        }
-        "TTL" => {
-            let ttl = ttl_value(input)?;
-            skip_line(input)?;
-            Ok(Entry::Ttl(ttl))
-        }
+        "ORIGIN" => dns_name.map(Entry::Origin).parse_next(input),
+        "TTL" => ttl_value.map(Entry::Ttl).parse_next(input),
         "INCLUDE" => {
             let file = string_value(input)?;
             ws(input)?;
             let origin = opt(dns_name).parse_next(input)?;
-            skip_line(input)?;
             Ok(Entry::Include { file, origin })
         }
-        "GENERATE" => {
-            let g = generate_directive(input)?;
-            skip_line(input)?;
-            Ok(Entry::Generate(g))
-        }
-        _ => {
-            skip_line(input)?;
-            Ok(Entry::Blank)
-        }
+        "GENERATE" => generate_directive.map(Entry::Generate).parse_next(input),
+        _ => Ok(Entry::Blank),
     }
 }
 
 fn record_entry(input: &mut &str) -> ModalResult<ResourceRecord> {
-    // name (optional if starts with whitespace)
+    // name (absent if the line starts with whitespace: inherit the previous owner)
     let name: Option<Name> = if input.starts_with(|c: char| c.is_whitespace()) {
         None
     } else {
         Some(dns_name(input)?)
     };
-
-    ws(input)?;
 
     // optional TTL or CLASS in any order
     let mut ttl: Option<u32> = None;
@@ -127,7 +165,6 @@ fn record_entry(input: &mut &str) -> ModalResult<ResourceRecord> {
 
     ws(input)?;
     let rdata = rdata(input)?;
-    skip_line(input)?;
 
     Ok(ResourceRecord {
         name,
@@ -166,7 +203,7 @@ fn rdata(input: &mut &str) -> ModalResult<RData> {
         "SVCB" => rdata_svcb.map(RData::Svcb).parse_next(input),
         "ANAME" | "ALIAS" => dns_name.map(RData::Aname).parse_next(input),
         _ => {
-            let data = rest_of_line(input)?;
+            let data = rest_of_line(input);
             Ok(RData::Unknown { rtype, data })
         }
     }
@@ -191,136 +228,69 @@ fn rdata_soa(input: &mut &str) -> ModalResult<SoaData> {
     ws(input)?;
     let rname = dns_name(input)?;
     ws(input)?;
-    // SOA params may span lines inside parentheses; collect raw text.
-    let content: String = if input.starts_with('(') {
-        // Consume everything until the matching ')'
-        let mut depth = 0usize;
-        let mut out = String::new();
-        let mut consumed = 0usize;
-        for c in input.chars() {
-            consumed += c.len_utf8();
-            match c {
-                '(' => {
-                    depth += 1;
-                }
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => out.push(c),
-            }
-        }
-        *input = &input[consumed..];
-        out
-    } else {
-        rest_of_line(input)?
-    };
-    // Parse the five SOA values; each may use a TTL suffix (1d, 2h, etc.).
-    let nums: Vec<u32> = content
-        .lines()
-        .flat_map(|line| {
-            let stripped = if let Some(pos) = line.find(';') {
-                &line[..pos]
-            } else {
-                line
-            };
-            stripped
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .filter_map(|tok| parse_ttl_token(&tok))
+    // The five SOA values; each may use TTL units (1d, 2h, 1h30m, ...).
+    // Parentheses and comments were already removed by `next_logical_line`.
+    let nums: Vec<u32> = rest_of_line(input)
+        .split_whitespace()
+        .filter_map(parse_ttl_token)
         .collect();
-    if nums.len() < 5 {
-        return Err(winnow::error::ErrMode::Backtrack(
-            winnow::error::ContextError::new(),
-        ));
-    }
+    let [serial, refresh, retry, expire, minimum] = nums[..] else {
+        return Err(ErrMode::Backtrack(ContextError::new()));
+    };
     Ok(SoaData {
         mname,
         rname,
-        serial: nums[0],
-        refresh: nums[1],
-        retry: nums[2],
-        expire: nums[3],
-        minimum: nums[4],
+        serial,
+        refresh,
+        retry,
+        expire,
+        minimum,
     })
 }
 
-/// Parse a single TTL token (e.g. `86400`, `1d`, `2h`).
-fn parse_ttl_token(s: &str) -> Option<u32> {
-    if s.is_empty() {
-        return None;
-    }
-    let (num_part, suffix) = if s.ends_with(|c: char| "smhdwSMHDW".contains(c)) {
-        (&s[..s.len() - 1], s.chars().last())
-    } else {
-        (s, None)
-    };
-    let n: u32 = num_part.parse().ok()?;
-    let mult = match suffix.map(|c| c.to_ascii_lowercase()) {
-        None | Some('s') => 1,
-        Some('m') => 60,
-        Some('h') => 3600,
-        Some('d') => 86_400,
-        Some('w') => 604_800,
-        _ => return None,
-    };
-    Some(n * mult)
+/// Parse a single whole TTL token (e.g. `86400`, `1d`, `1h30m`).
+fn parse_ttl_token(token: &str) -> Option<u32> {
+    let mut rest = token;
+    ttl_value(&mut rest).ok().filter(|_| rest.is_empty())
 }
 
-/// Parse a TTL token: a plain number or one with a suffix (s/m/h/d/w).
+/// Index of the closing unescaped `"` of a string that starts with `"`, or the
+/// string length if it is unterminated.
+fn closing_quote(s: &str) -> usize {
+    let mut prev_backslashes = 0usize;
+    for (i, b) in s.bytes().enumerate().skip(1) {
+        if b == b'"' && prev_backslashes % ESCAPE_PAIR == 0 {
+            return i;
+        }
+        prev_backslashes = if b == b'\\' { prev_backslashes + 1 } else { 0 };
+    }
+    s.len()
+}
+
+/// Parse TXT character-strings: quoted strings or bare words.
 fn rdata_txt(input: &mut &str) -> ModalResult<Vec<String>> {
-    // Parse TXT data on the current line only — never cross line boundaries.
-    let line = rest_of_line(input)?;
+    let line = rest_of_line(input);
     let mut parts: Vec<String> = Vec::new();
-    let mut s = line.trim();
+    let mut s = line.as_str();
     while !s.is_empty() {
-        s = s.trim_start_matches([' ', '\t']);
-        if s.is_empty() {
-            break;
-        }
-        if s.starts_with(';') {
-            break;
-        }
         if s.starts_with('"') {
-            // find closing unescaped quote
-            let bytes = s.as_bytes();
-            let mut i = 1usize;
-            while i < bytes.len() {
-                if bytes[i] == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == b'"' {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            let inner = &s[1..i.saturating_sub(1)];
+            let close = closing_quote(s);
+            let inner = &s[1..close];
             parts.push(inner.replace("\\\"", "\"").replace("\\\\", "\\"));
-            s = &s[i..];
+            s = s.get(close + 1..).unwrap_or_default();
         } else {
             let end = s
-                .find(|c: char| c.is_whitespace() || c == '"' || c == ';')
+                .find(|c: char| c.is_whitespace() || c == '"')
                 .unwrap_or(s.len());
-            if end == 0 {
-                break;
-            }
             parts.push(s[..end].to_owned());
             s = &s[end..];
         }
+        s = s.trim_start();
     }
     if parts.is_empty() {
-        Err(winnow::error::ErrMode::Backtrack(
-            winnow::error::ContextError::new(),
-        ))
-    } else {
-        Ok(parts)
+        return Err(ErrMode::Backtrack(ContextError::new()));
     }
+    Ok(parts)
 }
 
 fn rdata_hinfo(input: &mut &str) -> ModalResult<RData> {
@@ -463,7 +433,13 @@ fn rdata_dnskey(input: &mut &str) -> ModalResult<DnskeyData> {
         .try_map(|s: &str| s.parse::<u8>())
         .parse_next(input)?;
     ws(input)?;
-    let public_key = base64_string(input)?;
+    // The key may be split into whitespace-separated chunks (RFC 4034 section 2.2).
+    let public_key = repeat(1.., (base64_string, ws).map(|(chunk, ())| chunk))
+        .fold(String::new, |mut acc, chunk: String| {
+            acc.push_str(&chunk);
+            acc
+        })
+        .parse_next(input)?;
     Ok(DnskeyData {
         flags,
         protocol,
@@ -532,8 +508,13 @@ fn generate_directive(input: &mut &str) -> ModalResult<GenerateDirective> {
         .parse_next(input)?;
     let range_step =
         opt(preceded('/', digit1.try_map(|s: &str| s.parse::<u32>()))).parse_next(input)?;
-    ws(input)?;
-    let lhs = bareword(input)?;
+    // The range must end at whitespace; anything else (`1-2/x`, `1-2x`) is malformed.
+    space1.parse_next(input)?;
+    // The LHS is a name template that carries `$` / `${offset,width,base}`
+    // substitution markers, so it is any run of non-whitespace.
+    let lhs = take_while(1.., |c: char| !c.is_whitespace())
+        .map(|s: &str| s.to_owned())
+        .parse_next(input)?;
     ws(input)?;
     let ttl = opt(ttl_value).parse_next(input)?;
     ws(input)?;
@@ -541,7 +522,7 @@ fn generate_directive(input: &mut &str) -> ModalResult<GenerateDirective> {
     ws(input)?;
     let rtype = bareword(input)?;
     ws(input)?;
-    let rhs = rest_of_line(input)?;
+    let rhs = rest_of_line(input);
     Ok(GenerateDirective {
         range_start,
         range_end,
@@ -585,41 +566,46 @@ fn record_class(input: &mut &str) -> ModalResult<RecordClass> {
 
 // ── TTL value ─────────────────────────────────────────────────────────────────
 
-/// Parse a TTL value, optionally with unit suffix (s/m/h/d/w).
+/// Parse a TTL value, optionally with unit suffixes (s/m/h/d/w), e.g. `1h30m`.
 ///
 /// # Errors
-/// Returns a parse error if no numeric TTL token is found.
+/// Returns a parse error if no numeric TTL token is found, or if the value
+/// does not fit in a `u32`.
 pub fn ttl_value(input: &mut &str) -> ModalResult<u32> {
     let mut total: u32 = 0;
     let mut found = false;
-    loop {
-        let Ok(n) = digit1::<_, winnow::error::ContextError>
-            .try_map(|s: &str| s.parse::<u32>())
-            .parse_next(input)
-        else {
-            break;
-        };
+    while let Ok(n) = digit1::<_, ContextError>
+        .try_map(|s: &str| s.parse::<u32>())
+        .parse_next(input)
+    {
         found = true;
-        let unit = opt(take_while(1..=1, |c: char| "smhdwSMHDW".contains(c))).parse_next(input)?;
-        let multiplier = match unit.map(|s: &str| s.to_ascii_lowercase()).as_deref() {
-            Some("m") => 60,
-            Some("h") => 3600,
-            Some("d") => 86_400,
-            Some("w") => 604_800,
+        let unit = input
+            .chars()
+            .next()
+            .filter(|c| "smhdwSMHDW".contains(*c))
+            .map(|c| c.to_ascii_lowercase());
+        if unit.is_some() {
+            *input = &input[1..];
+        }
+        let multiplier = match unit {
+            Some('m') => SECONDS_PER_MINUTE,
+            Some('h') => SECONDS_PER_HOUR,
+            Some('d') => SECONDS_PER_DAY,
+            Some('w') => SECONDS_PER_WEEK,
             _ => 1,
         };
-        total += n * multiplier;
-        if !matches!(input.chars().next(), Some(c) if c.is_ascii_digit()) {
+        total = n
+            .checked_mul(multiplier)
+            .and_then(|secs| total.checked_add(secs))
+            .ok_or_else(|| ErrMode::Backtrack(ContextError::new()))?;
+        if unit.is_none() {
             break;
         }
     }
-    if found {
-        Ok(total)
-    } else {
-        Err(winnow::error::ErrMode::Backtrack(
-            winnow::error::ContextError::new(),
-        ))
+    if !found {
+        return Err(ErrMode::Backtrack(ContextError::new()));
     }
+    Ok(total)
 }
 
 // ── IP addresses ──────────────────────────────────────────────────────────────
@@ -649,54 +635,13 @@ fn base64_string(input: &mut &str) -> ModalResult<String> {
     .parse_next(input)
 }
 
-/// Read the rest of the line up to (and including) the newline.
-/// Strips semicolon-style zone-file comments. Returns the non-comment content, trimmed.
-#[allow(clippy::unnecessary_wraps)]
-fn rest_of_line(input: &mut &str) -> ModalResult<String> {
-    let mut out = String::new();
-    let mut consumed = 0;
-    let mut in_comment = false;
-    for c in input.chars() {
-        if c == '\n' {
-            consumed += 1;
-            break;
-        }
-        consumed += c.len_utf8();
-        if c == ';' {
-            in_comment = true;
-        }
-        if !in_comment {
-            out.push(c);
-        }
-    }
-    *input = &input[consumed..];
-    Ok(out.trim().to_owned())
-}
-
-/// Skip zone-file whitespace: spaces, tabs, newlines, and `;` to end-of-line comments.
-fn zws(input: &mut &str) -> ModalResult<()> {
-    loop {
-        // consume any run of whitespace
-        let before = input.len();
-        while input.starts_with([' ', '\t', '\r', '\n']) {
-            *input = &input[1..];
-        }
-        // consume a semicolon-style comment line
-        if input.starts_with(';') {
-            let _ = rest_of_line(input)?;
-            continue;
-        }
-        if input.len() == before {
-            break;
-        }
-    }
-    Ok(())
-}
-
-/// Skip to the end of the current line.
-fn skip_line(input: &mut &str) -> ModalResult<()> {
-    let _ = rest_of_line(input)?;
-    Ok(())
+/// Take the rest of a logical line, trimmed.
+///
+/// Comments were already removed by [`next_logical_line`].
+fn rest_of_line(input: &mut &str) -> String {
+    let out = input.trim().to_owned();
+    *input = "";
+    out
 }
 
 #[cfg(test)]

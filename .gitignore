@@ -10,3 +10,6 @@ licenses.json
 lcov.info
 subjects.sha256
 subjects.b64
+
+# Claude Code agent worktrees (local scratch checkouts, never committed)
+.claude/worktrees/

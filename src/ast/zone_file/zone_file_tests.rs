@@ -320,4 +320,108 @@ mod tests {
         };
         assert!(p.value.is_none());
     }
+
+    // ── RData::rtype for the remaining types ───────────────────────────────────
+
+    use super::super::{
+        LatDir, LocData, LonDir, NaptrData, Nsec3Data, Nsec3paramData, RrsigData, SshfpData,
+        TlsaData,
+    };
+
+    fn sample_loc() -> LocData {
+        LocData {
+            d_lat: 52,
+            m_lat: 22,
+            s_lat: 23.0,
+            lat_dir: LatDir::N,
+            d_lon: 4,
+            m_lon: 53,
+            s_lon: 32.0,
+            lon_dir: LonDir::E,
+            altitude: -2.0,
+            size: 1.0,
+            horiz_pre: 10_000.0,
+            vert_pre: 10.0,
+        }
+    }
+
+    #[test]
+    fn test_rdata_rtype_remaining_types() {
+        let cases = [
+            (
+                RData::Naptr(NaptrData {
+                    order: 100,
+                    preference: 10,
+                    flags: "U".into(),
+                    service: "E2U+sip".into(),
+                    regexp: "!^.*$!sip:info@example.com!".into(),
+                    replacement: Name::new("."),
+                }),
+                "NAPTR",
+            ),
+            (RData::Loc(sample_loc()), "LOC"),
+            (
+                RData::Rrsig(RrsigData {
+                    type_covered: "A".into(),
+                    algorithm: 13,
+                    labels: 2,
+                    original_ttl: 3600,
+                    sig_expiration: "20261101000000".into(),
+                    sig_inception: "20261001000000".into(),
+                    key_tag: 12345,
+                    signer_name: Name::new("example.com."),
+                    signature: "c2lnbmF0dXJl".into(),
+                }),
+                "RRSIG",
+            ),
+            (
+                RData::Nsec3(Nsec3Data {
+                    hash_algorithm: 1,
+                    flags: 0,
+                    iterations: 0,
+                    salt: "-".into(),
+                    next_hashed: "2T7B4G4VSA5SMI47K61MV5BV1A22BOJR".into(),
+                    type_bitmap: vec!["A".into(), "RRSIG".into()],
+                }),
+                "NSEC3",
+            ),
+            (
+                RData::Nsec3param(Nsec3paramData {
+                    hash_algorithm: 1,
+                    flags: 0,
+                    iterations: 0,
+                    salt: "-".into(),
+                }),
+                "NSEC3PARAM",
+            ),
+            (
+                RData::Sshfp(SshfpData {
+                    algorithm: 4,
+                    fp_type: 2,
+                    fingerprint: "abcd".into(),
+                }),
+                "SSHFP",
+            ),
+            (
+                RData::Tlsa(TlsaData {
+                    usage: 3,
+                    selector: 1,
+                    matching_type: 1,
+                    data: "abcd".into(),
+                }),
+                "TLSA",
+            ),
+        ];
+        for (rdata, expected) in cases {
+            assert_eq!(rdata.rtype(), expected);
+        }
+    }
+
+    #[test]
+    fn test_lat_lon_dirs_are_distinct() {
+        assert_ne!(LatDir::N, LatDir::S);
+        assert_ne!(LonDir::E, LonDir::W);
+        let loc = sample_loc();
+        assert_eq!(loc.clone(), loc);
+    }
 }

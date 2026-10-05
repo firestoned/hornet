@@ -8,20 +8,4 @@
 #
 # A listed case that starts passing fails the run (XPASS): delete its line.
 
-# controls: the writer emits `keys { "rndc-key" }` with no ';' after the last
-# key name, which named-checkconf rejects ("missing ';' before '}'").
-* basic.conf bind-accepts-parse    # controls keys list missing trailing ';'
-* basic.conf semantic-equivalent   # same root cause: hornet output fails to load
-* basic.conf bind-accepts-convert  # same root cause: convert shares the writer
-
-# Zone parser: the record that immediately follows a single-line SOA is
-# silently dropped (here the apex NS), so named-checkzone rejects the output
-# ("has no NS records"). Silent data loss.
-* 1.168.192.in-addr.arpa.zone bind-accepts-zone    # NS after single-line SOA dropped
-* 1.168.192.in-addr.arpa.zone semantic-equivalent  # same root cause
-
-# Zone parser: the record that immediately follows a TXT record is silently
-# dropped (here `_sip._tcp SRV`; on the second pass `sip A`). Silent data loss,
-# and the reason a second pass is not idempotent.
-* example.com.zone semantic-equivalent  # record after TXT dropped
-* example.com.zone idempotent           # same root cause: each pass drops another record
+# (none: every case passes on BIND 9.18 and 9.20)

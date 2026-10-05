@@ -3,7 +3,8 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ErrorLocation, Severity, ValidationError};
+    use super::super::{Error, ErrorLocation, Severity, ValidationError};
+    use miette::Diagnostic;
 
     #[test]
     fn test_severity_display_info() {
@@ -134,5 +135,72 @@ mod tests {
         let e2 = e.clone();
         assert_eq!(e.severity, e2.severity);
         assert_eq!(e.message, e2.message);
+    }
+
+    // ── Error variants: Display and miette diagnostic codes ─────────────────────
+
+    fn parse_error() -> Error {
+        Error::Parse {
+            file: "named.conf".to_string(),
+            message: "unexpected token".to_string(),
+            src: miette::NamedSource::new("named.conf", "zone {".to_string()),
+            span: (0, 0).into(),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_display() {
+        assert_eq!(
+            parse_error().to_string(),
+            "Parse error in named.conf: unexpected token"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_diagnostic_code_and_source() {
+        let err = parse_error();
+        assert_eq!(
+            err.code().map(|c| c.to_string()),
+            Some("hornet_bind9::parse".to_string())
+        );
+        assert!(err.source_code().is_some());
+        let labels: Vec<_> = err.labels().expect("parse error has a label").collect();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].label(), Some("here"));
+    }
+
+    #[test]
+    fn test_validation_error_converts_into_error() {
+        let err: Error = ValidationError {
+            severity: Severity::Error,
+            message: "bad zone".to_string(),
+            location: None,
+        }
+        .into();
+        assert_eq!(err.to_string(), "Validation error: error: bad zone");
+        assert_eq!(
+            err.code().map(|c| c.to_string()),
+            Some("hornet_bind9::validate".to_string())
+        );
+    }
+
+    #[test]
+    fn test_io_error_converts_into_error() {
+        let err: Error = std::io::Error::new(std::io::ErrorKind::NotFound, "missing").into();
+        assert_eq!(err.to_string(), "I/O error: missing");
+        assert_eq!(
+            err.code().map(|c| c.to_string()),
+            Some("hornet_bind9::io".to_string())
+        );
+    }
+
+    #[test]
+    fn test_write_error_display_and_code() {
+        let err = Error::Write("disk full".to_string());
+        assert_eq!(err.to_string(), "Write error: disk full");
+        assert_eq!(
+            err.code().map(|c| c.to_string()),
+            Some("hornet_bind9::write".to_string())
+        );
     }
 }

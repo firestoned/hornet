@@ -1,0 +1,22 @@
+; Copyright (c) 2025 Erick Bourgeois, firestoned
+; SPDX-License-Identifier: Apache-2.0
+;
+; DNSSEC record types as presentation data: DNSKEY, RRSIG and NSEC. The
+; signatures are not cryptographically valid; named-checkzone checks their
+; syntax, not the chain of trust.
+$TTL 3600
+$ORIGIN dnssec.example.
+
+@       IN  SOA ns1.dnssec.example. hostmaster.dnssec.example. (
+                1           ; serial
+                7200        ; refresh
+                3600        ; retry
+                1209600     ; expire
+                300 )       ; minimum
+
+@       IN  NS      ns1.dnssec.example.
+ns1     IN  A       192.0.2.1
+@       IN  DNSKEY  257 3 13 r9kJydCun2C2enqn/d+vX8rwQyEsqmwqz6CjuF+zLqsclPoH4v5SiXjnnkKlOWdTDSQQGqY2CtIABeJ7CYCveQ==
+ns1     IN  RRSIG   A 13 3 3600 20261101000000 20261001000000 12345 dnssec.example. r9kJydCun2C2enqn/d+vX8rwQyEsqmwqz6CjuF+zLqsclPoH4v5SiXjnnkKlOWdTDSQQGqY2CtIABeJ7CYCveQ==
+@       IN  NSEC    ns1.dnssec.example. NS SOA RRSIG NSEC DNSKEY
+ns1     IN  NSEC    dnssec.example. A RRSIG NSEC

@@ -81,6 +81,11 @@ www          IN      A     93.184.216.34
 mail    300  IN      MX    10 mail.example.com.
 ```
 
+A record whose owner field is blank (the line starts with whitespace) inherits
+the previous record's owner. Any record, not just SOA, may span several lines
+inside parentheses, which is how long DNSKEY and TXT (DKIM) records are usually
+written. A `;` inside a quoted string is part of the data, not a comment.
+
 ---
 
 ## Supported record types

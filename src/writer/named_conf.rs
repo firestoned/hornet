@@ -72,7 +72,7 @@ fn write_options(out: &mut String, b: &OptionsBlock, depth: usize, opts: &WriteO
         ($field:expr, $key:expr) => {
             if let Some(v) = $field {
                 indent(out, d, opts);
-                let _ = writeln!(out, "{} {};", $key, if v { "yes" } else { "no" });
+                let _ = writeln!(out, "{} {};", $key, yes_no(v));
             }
         };
     }
@@ -177,11 +177,7 @@ fn write_listen_on(
 fn write_zone(out: &mut String, z: &ZoneStmt, depth: usize, opts: &WriteOptions) {
     indent(out, depth, opts);
     let _ = write!(out, "zone {} ", quoted(&z.name));
-    if opts.explicit_class {
-        if let Some(c) = &z.class {
-            let _ = write!(out, "{c} ");
-        }
-    } else if let Some(c) = &z.class {
+    if let Some(c) = &z.class {
         let _ = write!(out, "{c} ");
     }
     out.push_str("{\n");
@@ -211,7 +207,7 @@ fn write_zone(out: &mut String, z: &ZoneStmt, depth: usize, opts: &WriteOptions)
         let _ = writeln!(out, "file {};", quoted(file));
     }
 
-    write_opt_aml(out, "primaries", zo.primaries.as_ref(), d, opts);
+    write_opt_aml(out, primaries_keyword(opts), zo.primaries.as_ref(), d, opts);
     write_opt_aml(out, "allow-query", zo.allow_query.as_ref(), d, opts);
     write_opt_aml(out, "allow-transfer", zo.allow_transfer.as_ref(), d, opts);
     write_opt_aml(out, "allow-update", zo.allow_update.as_ref(), d, opts);
@@ -229,7 +225,7 @@ fn write_zone(out: &mut String, z: &ZoneStmt, depth: usize, opts: &WriteOptions)
 
     if let Some(b) = zo.inline_signing {
         indent(out, d, opts);
-        let _ = writeln!(out, "inline-signing {};", if b { "yes" } else { "no" });
+        let _ = writeln!(out, "inline-signing {};", yes_no(b));
     }
 
     if let Some(dp) = &zo.dnssec_policy {
@@ -289,11 +285,7 @@ fn write_view(out: &mut String, v: &ViewStmt, depth: usize, opts: &WriteOptions)
     }
     if let Some(b) = v.options.match_recursive_only {
         indent(out, d, opts);
-        let _ = writeln!(
-            out,
-            "match-recursive-only {};",
-            if b { "yes" } else { "no" }
-        );
+        let _ = writeln!(out, "match-recursive-only {};", yes_no(b));
     }
 
     for zone in &v.options.zones {
@@ -371,7 +363,7 @@ fn write_logging(out: &mut String, l: &LoggingBlock, depth: usize, opts: &WriteO
             ($field:expr, $key:expr) => {
                 if let Some(v) = $field {
                     indent(out, dd, opts);
-                    let _ = writeln!(out, "{} {};", $key, if v { "yes" } else { "no" });
+                    let _ = writeln!(out, "{} {};", $key, yes_no(v));
                 }
             };
         }
@@ -451,9 +443,12 @@ fn write_controls(out: &mut String, c: &ControlsBlock, depth: usize, opts: &Writ
         if !ic.keys.is_empty() {
             out.push_str(" keys { ");
             for k in &ic.keys {
-                let _ = write!(out, "{} ", quoted(k));
+                let _ = write!(out, "{}; ", quoted(k));
             }
             out.push('}');
+        }
+        if let Some(ro) = ic.read_only {
+            let _ = write!(out, " read-only {}", yes_no(ro));
         }
         out.push_str(";\n");
     }
@@ -476,12 +471,17 @@ fn write_key(out: &mut String, k: &KeyStmt, depth: usize, opts: &WriteOptions) {
 
 // ── primaries ─────────────────────────────────────────────────────────────────
 
+/// `primaries` in modern style, its legacy alias `masters` otherwise. Used for
+/// both the top-level statement and the zone option.
+fn primaries_keyword(opts: &WriteOptions) -> &'static str {
+    if opts.modern_keywords {
+        return "primaries";
+    }
+    "masters"
+}
+
 fn write_primaries(out: &mut String, p: &PrimariesStmt, depth: usize, opts: &WriteOptions) {
-    let kw = if opts.modern_keywords {
-        "primaries"
-    } else {
-        "masters"
-    };
+    let kw = primaries_keyword(opts);
     indent(out, depth, opts);
     let _ = writeln!(out, "{kw} {} {{", quoted(&p.name));
     for srv in &p.servers {
@@ -507,7 +507,7 @@ fn write_server(out: &mut String, s: &ServerStmt, depth: usize, opts: &WriteOpti
     let d = depth + 1;
     if let Some(b) = s.options.bogus {
         indent(out, d, opts);
-        let _ = writeln!(out, "bogus {};", if b { "yes" } else { "no" });
+        let _ = writeln!(out, "bogus {};", yes_no(b));
     }
     if let Some(t) = s.options.transfers {
         indent(out, d, opts);
@@ -585,6 +585,13 @@ fn aml_element_str(e: &AddressMatchElement) -> String {
         AddressMatchElement::Key(k) => format!("key \"{k}\""),
         AddressMatchElement::Negated(inner) => format!("!{}", aml_element_str(inner)),
     }
+}
+
+fn yes_no(b: bool) -> &'static str {
+    if b {
+        return "yes";
+    }
+    "no"
 }
 
 fn notify_str(n: &NotifyOption) -> &'static str {
