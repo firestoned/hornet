@@ -9,7 +9,7 @@ derive `serde::Serialize` and `serde::Deserialize`.
 
 ```toml
 [dependencies]
-hornet = { version = "0.1", features = ["serde"] }
+hornet-bind9 = { version = "0.2", features = ["serde"] }
 serde_json = "1"   # or any serde format you prefer
 ```
 
@@ -20,7 +20,7 @@ serde_json = "1"   # or any serde format you prefer
 ```rust
 use hornet_bind9::{parse_named_conf, ast::named_conf::NamedConf};
 
-let conf: NamedConf = hornet::parse_named_conf(input)?;
+let conf: NamedConf = hornet_bind9::parse_named_conf(input)?;
 
 // Serialize to JSON
 let json = serde_json::to_string_pretty(&conf)?;
@@ -57,7 +57,7 @@ Example output (abbreviated):
 ```rust
 use hornet_bind9::{parse_zone_file, ast::zone_file::ZoneFile};
 
-let zone: ZoneFile = hornet::parse_zone_file(zone_text)?;
+let zone: ZoneFile = hornet_bind9::parse_zone_file(zone_text)?;
 let json = serde_json::to_string_pretty(&zone)?;
 println!("{json}");
 ```
@@ -69,7 +69,7 @@ println!("{json}");
 With serde enabled you can round-trip through JSON:
 
 ```rust
-let conf: NamedConf = hornet::parse_named_conf(input)?;
+let conf: NamedConf = hornet_bind9::parse_named_conf(input)?;
 
 // Round-trip through JSON
 let json = serde_json::to_string(&conf)?;

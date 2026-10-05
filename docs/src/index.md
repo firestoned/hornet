@@ -126,7 +126,7 @@ Hornet is designed for:
 Hornet is actively developed. It supports the full breadth of `named.conf` statement types and
 24+ DNS record types. The library API is stabilising toward a 1.0 release.
 
-Current version: **v0.1.0**
+Current version: **v0.2.0**
 
 ---
 

@@ -343,3 +343,274 @@ fn zone_and_view_with_hesiod_and_chaos_classes() {
     assert_eq!(z.class, Some(DnsClass::Hs));
     assert_eq!(z.options.zone_type, Some(ZoneType::Hint));
 }
+
+/// The writer escapes `"` and `\` in quoted strings; the parser must read its
+/// own output back to the same values.
+#[test]
+fn escaped_quotes_and_backslashes_round_trip_through_the_writer() {
+    let conf =
+        parse_named_conf(r#"zone "odd\"name\\x" { type primary; file "C:\\zones\\\"q\".db"; };"#)
+            .expect("parse failed");
+    let Statement::Zone(z) = &conf.statements[0] else {
+        panic!("expected Zone, got {:?}", conf.statements[0]);
+    };
+    assert_eq!(z.name, r#"odd"name\x"#);
+    assert_eq!(z.options.file.as_deref(), Some(r#"C:\zones\"q".db"#));
+
+    let written =
+        hornet_bind9::write_named_conf(&conf, &hornet_bind9::writer::WriteOptions::default());
+    let reparsed = parse_named_conf(&written).expect("re-parse failed");
+    assert_eq!(reparsed, conf, "written:\n{written}");
+}
+
+/// ACL names that begin with a reserved address-match word are references to
+/// that ACL, as BIND reads them.
+#[test]
+fn acl_names_starting_with_reserved_words_resolve_as_references() {
+    let conf = parse_named_conf(
+        r#"
+        acl "anyone" { 10.0.0.1; };
+        acl "nonexistent" { 10.0.0.2; };
+        options { allow-query { anyone; nonexistent; }; };
+        "#,
+    )
+    .expect("parse failed");
+    assert_eq!(conf.statements.len(), 3);
+    let Statement::Options(o) = &conf.statements[2] else {
+        panic!("expected Options, got {:?}", conf.statements[2]);
+    };
+    assert_eq!(
+        o.allow_query,
+        Some(vec![
+            AddressMatchElement::AclRef("anyone".to_string()),
+            AddressMatchElement::AclRef("nonexistent".to_string()),
+        ])
+    );
+    let diagnostics = hornet_bind9::validate_named_conf(&conf);
+    assert!(
+        diagnostics.iter().all(|d| !d.message.contains("anyone")),
+        "{diagnostics:?}"
+    );
+}
+
+fn addr(s: &str) -> IpAddr {
+    s.parse().expect("valid IP literal")
+}
+
+fn acl(name: &str) -> AddressMatchElement {
+    AddressMatchElement::AclRef(name.to_string())
+}
+
+fn zone_with(name: &str, options: ZoneOptions) -> Statement {
+    Statement::Zone(ZoneStmt {
+        name: name.to_string(),
+        class: None,
+        options,
+    })
+}
+
+/// A configuration using every field the writer emits beyond the basics:
+/// writing it and parsing the text back must give the same AST.
+fn writer_coverage_conf() -> NamedConf {
+    let mut statements = vec![coverage_options()];
+    statements.extend(coverage_zones());
+    statements.extend([coverage_controls(), coverage_primaries()]);
+    statements.extend(coverage_servers());
+    NamedConf { statements }
+}
+
+fn coverage_options() -> Statement {
+    Statement::Options(OptionsBlock {
+        memstatistics_file: Some("/var/named/mem.stats".to_string()),
+        session_keyfile: Some("/run/named/session.key".to_string()),
+        allow_update: Some(vec![AddressMatchElement::Key("ddns".to_string())]),
+        allow_query: Some(vec![
+            acl("trusted-nets"),
+            // Reserved words and non-bareword names are written quoted.
+            acl("any"),
+            acl("trusted nets"),
+            AddressMatchElement::Negated(Box::new(acl("blocked"))),
+            AddressMatchElement::Any,
+        ]),
+        max_cache_ttl: Some(86_400),
+        min_cache_ttl: Some(30),
+        rate_limit: Some(RateLimit {
+            responses_per_second: Some(10),
+            referrals_per_second: Some(11),
+            nodata_per_second: Some(12),
+            nxdomains_per_second: Some(13),
+            errors_per_second: Some(14),
+            all_per_second: Some(15),
+            window: Some(16),
+            log_only: Some(true),
+            slip: Some(2),
+        }),
+        response_policy: vec![
+            ResponsePolicy {
+                zone: "rpz.local".to_string(),
+                policy: None,
+            },
+            ResponsePolicy {
+                zone: "rpz.walled".to_string(),
+                policy: Some("cname walled.example.".to_string()),
+            },
+        ],
+        ..OptionsBlock::default()
+    })
+}
+
+fn coverage_zones() -> Vec<Statement> {
+    vec![
+        zone_with(
+            "dyn.example",
+            ZoneOptions {
+                zone_type: Some(ZoneType::Primary),
+                file: Some("dyn.example.db".to_string()),
+                update_policy: Some(UpdatePolicy {
+                    rules: vec![
+                        UpdatePolicyRule {
+                            action: UpdateAction::Grant,
+                            identity: "ddns-key.".to_string(),
+                            name_type: "zonesub".to_string(),
+                            name: None,
+                            types: vec!["ANY".to_string()],
+                        },
+                        UpdatePolicyRule {
+                            action: UpdateAction::Deny,
+                            identity: "*.dyn.example.".to_string(),
+                            name_type: "self".to_string(),
+                            name: Some("*.dyn.example.".to_string()),
+                            types: vec!["A".to_string(), "AAAA".to_string()],
+                        },
+                    ],
+                }),
+                notify_source: Some(addr("192.0.2.53")),
+                check_names: Some(CheckNames::Warn),
+                auto_dnssec: Some(AutoDnssec::Maintain),
+                max_journal_size: Some(SizeSpec::Megabytes(10)),
+                ..ZoneOptions::default()
+            },
+        ),
+        zone_with(
+            "fwd.example",
+            ZoneOptions {
+                zone_type: Some(ZoneType::Forward),
+                forward: Some(ForwardPolicy::Only),
+                forwarders: vec![addr("192.0.2.1"), addr("2001:db8::1")],
+                notify_source: Some(addr("2001:db8::53")),
+                check_names: Some(CheckNames::Fail),
+                auto_dnssec: Some(AutoDnssec::Off),
+                ..ZoneOptions::default()
+            },
+        ),
+        zone_with(
+            "shared.example",
+            ZoneOptions {
+                zone_type: Some(ZoneType::InView("internal".to_string())),
+                ..ZoneOptions::default()
+            },
+        ),
+        zone_with(
+            "deleg.example",
+            ZoneOptions {
+                zone_type: Some(ZoneType::Delegation),
+                check_names: Some(CheckNames::Ignore),
+                auto_dnssec: Some(AutoDnssec::Allow),
+                ..ZoneOptions::default()
+            },
+        ),
+    ]
+}
+
+fn coverage_controls() -> Statement {
+    Statement::Controls(ControlsBlock {
+        inet: vec![InetControl {
+            address: addr("127.0.0.1"),
+            port: 953,
+            allow: vec![AddressMatchElement::Localhost],
+            keys: vec!["rndc-key".to_string()],
+            read_only: Some(false),
+        }],
+        unix: vec![UnixControl {
+            path: "/run/named/control".to_string(),
+            perm: Some(0o600),
+            owner: Some(101),
+            group: Some(102),
+            keys: vec!["rndc-key".to_string()],
+            read_only: Some(true),
+        }],
+    })
+}
+
+fn coverage_primaries() -> Statement {
+    Statement::Primaries(PrimariesStmt {
+        name: "upstream".to_string(),
+        servers: vec![
+            RemoteServer {
+                address: addr("192.0.2.10"),
+                port: Some(853),
+                dscp: None,
+                key: Some("xfer".to_string()),
+                tls: Some("dot".to_string()),
+            },
+            RemoteServer {
+                address: addr("192.0.2.11"),
+                port: None,
+                dscp: None,
+                key: None,
+                tls: Some("ephemeral".to_string()),
+            },
+        ],
+    })
+}
+
+fn coverage_servers() -> Vec<Statement> {
+    vec![
+        Statement::Server(ServerStmt {
+            address: addr("192.0.2.20"),
+            options: ServerOptions {
+                transfer_format: Some(TransferFormat::ManyAnswers),
+                transfer_source: Some(addr("192.0.2.21")),
+                notify_source: Some(addr("192.0.2.22")),
+                query_source: Some(addr("192.0.2.23")),
+                send_cookie: Some(true),
+                edns_version: Some(0),
+                ..ServerOptions::default()
+            },
+        }),
+        Statement::Server(ServerStmt {
+            address: addr("2001:db8::20"),
+            options: ServerOptions {
+                transfer_format: Some(TransferFormat::OneAnswer),
+                transfer_source: Some(addr("2001:db8::21")),
+                notify_source: Some(addr("2001:db8::22")),
+                query_source: Some(addr("2001:db8::23")),
+                send_cookie: Some(false),
+                ..ServerOptions::default()
+            },
+        }),
+    ]
+}
+
+/// Every field the writer emits is read back by the parser to the same value.
+#[test]
+fn every_written_field_parses_back_to_the_same_ast() {
+    let conf = writer_coverage_conf();
+    let written =
+        hornet_bind9::write_named_conf(&conf, &hornet_bind9::writer::WriteOptions::default());
+    let reparsed = parse_named_conf(&written).expect("re-parse failed");
+    assert_eq!(reparsed, conf, "written:\n{written}");
+}
+
+/// The same with legacy keywords (`master`, `slave`, `masters`).
+#[test]
+fn every_written_field_parses_back_with_legacy_keywords() {
+    let conf = writer_coverage_conf();
+    let opts = hornet_bind9::writer::WriteOptions {
+        modern_keywords: false,
+        ..hornet_bind9::writer::WriteOptions::default()
+    };
+    let written = hornet_bind9::write_named_conf(&conf, &opts);
+    let reparsed = parse_named_conf(&written).expect("re-parse failed");
+    assert_eq!(reparsed, conf, "written:\n{written}");
+}

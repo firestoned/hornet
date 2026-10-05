@@ -6,14 +6,14 @@
 
 ```toml
 [dependencies]
-hornet-bind9 = "0.1"
+hornet-bind9 = "0.2"
 ```
 
 ### With serde support
 
 ```toml
 [dependencies]
-hornet = { version = "0.1", features = ["serde"] }
+hornet-bind9 = { version = "0.2", features = ["serde"] }
 ```
 
 ### From source

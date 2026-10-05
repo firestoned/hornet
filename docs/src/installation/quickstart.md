@@ -10,14 +10,14 @@ Add hornet to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hornet-bind9 = "0.1"
+hornet-bind9 = "0.2"
 ```
 
 To enable `serde` support on all AST types:
 
 ```toml
 [dependencies]
-hornet = { version = "0.1", features = ["serde"] }
+hornet-bind9 = { version = "0.2", features = ["serde"] }
 ```
 
 ---

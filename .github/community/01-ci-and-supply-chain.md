@@ -9,12 +9,13 @@
 > workflow files are deleted, and branch protection on `main` requires the
 > `PR Checks Passed` and `E2E gate` checks.
 
-> **Status:** 🔶 In progress (opened 2026-10-05). Design recorded in
+> **Status:** ✅ Complete 2026-10-05 (opened the same day). Design recorded in
 > [ADR-0001](../../docs/adr/0001-single-build-workflow-and-bind9-e2e-oracle.md).
 > Workflows landed 2026-10-05; e2e passes 16/16 checks on BIND 9.18.50 and
 > 9.20.29 with 7 known failures (three real hornet bugs, below), all fixed the
-> same day; e2e now passes 56/56 on both. Open: branch protection and
-> committing `Cargo.lock`.
+> same day; e2e now passes 60/60 on both and runs on every PR (so `E2E gate`
+> can be a required check). `Cargo.lock` is committed and every build uses
+> `--locked`. Branch protection is on.
 
 ## Why
 
@@ -72,7 +73,7 @@ that BIND would reject passes CI.
 
 ### Follow-ups found while landing this
 
-- [ ] Branch protection on `main` requires `PR Checks Passed` and `E2E gate`
+- [x] Branch protection on `main` requires `PR Checks Passed` and `E2E gate`
       (repo setting, not code); enable "Allow auto-merge" for Dependabot
 - [x] Writer: `controls { ... keys { "k" } }` is emitted without the `;` after
       the last key, which `named-checkconf` rejects (`src/writer/named_conf.rs`)
@@ -80,7 +81,7 @@ that BIND would reject passes CI.
       (`src/parser/zone_file.rs`)
 - [x] Zone parser: the record after a TXT record is silently dropped, which
       also makes `fmt` non-idempotent (`src/parser/zone_file.rs`)
-- [ ] Commit `Cargo.lock` (today gitignored) so CI builds are reproducible and
+- [x] Commit `Cargo.lock` (today gitignored) so CI builds are reproducible and
       can use `--locked` like bindy
 
 The three bugs were fixed test-first on 2026-10-05 under roadmap 02 (the two

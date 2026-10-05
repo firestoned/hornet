@@ -4,55 +4,165 @@
 //! Common parser primitives shared by both named.conf and zone file parsers.
 
 use winnow::{
-    ascii::{digit1, hex_digit1, multispace1, till_line_ending},
-    combinator::{alt, delimited, opt, preceded, repeat},
-    token::{one_of, take_until},
+    ascii::{digit1, hex_digit1},
+    combinator::{alt, opt, preceded},
+    error::{ContextError, ErrMode},
+    token::one_of,
     ModalResult, Parser,
 };
 
+/// Characters BIND9's lexer treats as whitespace between tokens.
+const WHITESPACE: [char; 4] = [' ', '\t', '\r', '\n'];
+/// Punctuation that may appear inside a bareword, alongside alphanumerics.
+const WORD_PUNCTUATION: [char; 5] = ['-', '_', '.', '/', ':'];
+const LINE_COMMENT_SLASH: &str = "//";
+const LINE_COMMENT_HASH: &str = "#";
+const BLOCK_COMMENT_OPEN: &str = "/*";
+const BLOCK_COMMENT_CLOSE: &str = "*/";
+
+/// The error every primitive here reports: recoverable, so `alt` and
+/// [`optional`] can try the next alternative.
+fn backtrack() -> ErrMode<ContextError> {
+    ErrMode::Backtrack(ContextError::new())
+}
+
 // ── Whitespace + comment skipping ─────────────────────────────────────────────
 
-/// Skip any mix of whitespace and BIND9 comments (// # /* */).
+/// Skip any mix of whitespace and BIND9 comments (`//`, `#`, `/* */`).
+///
+/// Never fails. An unterminated `/*` is not a comment: the input is left at the
+/// `/*` so the caller reports it.
+pub fn skip_ws(input: &mut &str) {
+    loop {
+        let rest = input.trim_start_matches(WHITESPACE);
+        *input = rest;
+        if let Some(after) = rest
+            .strip_prefix(LINE_COMMENT_SLASH)
+            .or_else(|| rest.strip_prefix(LINE_COMMENT_HASH))
+        {
+            *input = after.find('\n').map_or("", |end| &after[end..]);
+            continue;
+        }
+        let Some(after) = rest.strip_prefix(BLOCK_COMMENT_OPEN) else {
+            return;
+        };
+        let Some(end) = after.find(BLOCK_COMMENT_CLOSE) else {
+            return;
+        };
+        *input = &after[end + BLOCK_COMMENT_CLOSE.len()..];
+    }
+}
+
+/// [`skip_ws`] as a winnow parser, for use inside combinators.
 ///
 /// # Errors
-/// Returns a parse error if the underlying parser combinators fail unexpectedly.
+/// Never fails; the `Result` only satisfies the parser signature.
 pub fn ws(input: &mut &str) -> ModalResult<()> {
-    repeat(
-        0..,
-        alt((
-            multispace1.void(),
-            line_comment_slash.void(),
-            line_comment_hash.void(),
-            block_comment.void(),
-        )),
-    )
-    .parse_next(input)
+    skip_ws(input);
+    Ok(())
 }
 
-fn line_comment_slash(input: &mut &str) -> ModalResult<()> {
-    preceded("//", till_line_ending).void().parse_next(input)
+// ── Words ─────────────────────────────────────────────────────────────────────
+
+/// True for characters that continue a bareword.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || WORD_PUNCTUATION.contains(&c)
 }
 
-fn line_comment_hash(input: &mut &str) -> ModalResult<()> {
-    preceded("#", till_line_ending).void().parse_next(input)
+/// Consume `word` if the input starts with it (compared with `eq`) and the
+/// next character does not continue a bareword.
+fn whole_word<'i>(
+    input: &mut &'i str,
+    word: &str,
+    eq: fn(&str, &str) -> bool,
+) -> ModalResult<&'i str> {
+    let n = word.len();
+    let Some(head) = input.get(..n) else {
+        return Err(backtrack());
+    };
+    if !eq(head, word) || input[n..].starts_with(is_word_char) {
+        return Err(backtrack());
+    }
+    *input = &input[n..];
+    Ok(head)
 }
 
-fn block_comment(input: &mut &str) -> ModalResult<()> {
-    delimited("/*", take_until(0.., "*/"), "*/")
-        .void()
-        .parse_next(input)
+/// Match a keyword: case-insensitive, whole word.
+///
+/// Only the keyword-length prefix is compared, so matching costs the length of
+/// the keyword, not the length of the remaining input.
+#[must_use]
+pub fn keyword<'i>(kw: &'static str) -> impl Parser<&'i str, &'i str, ContextError> {
+    move |input: &mut &'i str| whole_word(input, kw, str::eq_ignore_ascii_case)
+}
+
+/// Match a literal value word: case-sensitive, whole word.
+#[must_use]
+pub fn literal<'i>(word: &'static str) -> impl Parser<&'i str, &'i str, ContextError> {
+    move |input: &mut &'i str| whole_word(input, word, |a, b| a == b)
+}
+
+// ── Combinator helpers ────────────────────────────────────────────────────────
+
+/// Run `parser`; on failure restore the input and return `None`.
+///
+/// The infallible counterpart of `opt`: none of hornet's parsers raise a
+/// non-recoverable (cut) error, so there is no error to propagate.
+pub fn optional<'i, O, P>(input: &mut &'i str, mut parser: P) -> Option<O>
+where
+    P: Parser<&'i str, O, ContextError>,
+{
+    let start = *input;
+    parser.parse_next(input).ok().or_else(|| {
+        *input = start;
+        None
+    })
+}
+
+/// Apply `parser` until it fails, collecting the results. The input is left
+/// just after the last successful match.
+pub fn many0<'i, O, P>(input: &mut &'i str, mut parser: P) -> Vec<O>
+where
+    P: Parser<&'i str, O, ContextError>,
+{
+    let mut out = Vec::new();
+    while let Some(item) = optional(input, parser.by_ref()) {
+        out.push(item);
+    }
+    out
 }
 
 // ── String literals ────────────────────────────────────────────────────────────
+
+/// Byte offset of the first `"` in `s` that is not escaped by a backslash.
+pub(crate) fn closing_quote(s: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            _ if escaped => escaped = false,
+            b'\\' => escaped = true,
+            b'"' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
 
 /// Parse a double-quoted string, honouring `\"` and `\\` escapes.
 ///
 /// # Errors
 /// Returns a parse error if the input does not start with a `"` character
-/// or is missing the closing `"`.
+/// or is missing the closing (unescaped) `"`.
 pub fn quoted_string(input: &mut &str) -> ModalResult<String> {
-    let inner = take_until(0.., "\"");
-    delimited('"', inner, '"').map(unescape).parse_next(input)
+    let Some(body) = input.strip_prefix('"') else {
+        return Err(backtrack());
+    };
+    let Some(end) = closing_quote(body) else {
+        return Err(backtrack());
+    };
+    let value = unescape(&body[..end]);
+    *input = &body[end + 1..];
+    Ok(value)
 }
 
 fn unescape(s: &str) -> String {
@@ -83,11 +193,9 @@ fn unescape(s: &str) -> String {
 /// Returns a parse error if the input does not start with an alphanumeric character
 /// or one of the accepted punctuation characters.
 pub fn bareword(input: &mut &str) -> ModalResult<String> {
-    winnow::token::take_while(1.., |c: char| {
-        c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':')
-    })
-    .map(|s: &str| s.to_owned())
-    .parse_next(input)
+    winnow::token::take_while(1.., is_word_char)
+        .map(|s: &str| s.to_owned())
+        .parse_next(input)
 }
 
 /// Parse a quoted string or a bareword.
@@ -109,12 +217,12 @@ pub fn uint(input: &mut &str) -> ModalResult<u64> {
     digit1.try_map(|s: &str| s.parse::<u64>()).parse_next(input)
 }
 
-/// Parse `yes` or `no` into a `bool`.
+/// Parse `yes` or `no` into a `bool` (whole word).
 ///
 /// # Errors
 /// Returns a parse error if the input is neither `yes` nor `no`.
 pub fn yes_no(input: &mut &str) -> ModalResult<bool> {
-    alt(("yes".map(|_| true), "no".map(|_| false))).parse_next(input)
+    alt((literal("yes").map(|_| true), literal("no").map(|_| false))).parse_next(input)
 }
 
 // ── BIND9 size specs ──────────────────────────────────────────────────────────
@@ -127,8 +235,8 @@ use crate::ast::named_conf::SizeSpec;
 /// Returns a parse error if the input does not match any valid size specification.
 pub fn size_spec(input: &mut &str) -> ModalResult<SizeSpec> {
     alt((
-        "unlimited".map(|_| SizeSpec::Unlimited),
-        "default".map(|_| SizeSpec::Default),
+        literal("unlimited").map(|_| SizeSpec::Unlimited),
+        literal("default").map(|_| SizeSpec::Default),
         (uint, opt(one_of(['k', 'K', 'm', 'M', 'g', 'G']))).map(|(n, suffix)| {
             match suffix.map(|c| c.to_ascii_lowercase()) {
                 Some('k') => SizeSpec::Kilobytes(n),
@@ -197,7 +305,10 @@ pub fn hex_string(input: &mut &str) -> ModalResult<String> {
 /// # Errors
 /// Returns a parse error if no semicolon is found.
 pub fn semicolon(input: &mut &str) -> ModalResult<()> {
-    (ws, ';', ws).void().parse_next(input)
+    skip_ws(input);
+    ';'.parse_next(input)?;
+    skip_ws(input);
+    Ok(())
 }
 
 /// Consume `};` with surrounding whitespace.
@@ -205,7 +316,9 @@ pub fn semicolon(input: &mut &str) -> ModalResult<()> {
 /// # Errors
 /// Returns a parse error if `};` is not found at the current position.
 pub fn close_brace_semi(input: &mut &str) -> ModalResult<()> {
-    (ws, '}', ws, ';', ws).void().parse_next(input)
+    skip_ws(input);
+    '}'.parse_next(input)?;
+    semicolon(input)
 }
 
 #[cfg(test)]

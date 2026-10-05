@@ -8,7 +8,10 @@
 //! The e2e fixtures are reused so the corpus BIND9 checks and the corpus these
 //! tests check are the same files.
 
-use hornet_bind9::ast::zone_file::{Entry, Name, RData, ZoneFile};
+use hornet_bind9::ast::zone_file::{
+    CaaData, Entry, Name, NaptrData, RData, ResourceRecord, SvcParam, SvcbData, ZoneFile,
+    MODELLED_RTYPES,
+};
 use hornet_bind9::writer::WriteOptions;
 use hornet_bind9::{parse_zone_file, write_zone_file};
 
@@ -182,4 +185,201 @@ fn written_soa_is_parenthesised_and_reparses() {
     assert!(written.contains('('));
     assert_eq!(parse(&written), zone);
     assert_eq!(zone.records().count(), 2);
+}
+
+// ── Escaping: arbitrary strings survive and cannot inject ─────────────────────
+
+const RECORDS_ZONE: &str = include_str!("e2e/fixtures/zones/records.example.zone");
+const DNSSEC_ZONE: &str = include_str!("e2e/fixtures/zones/dnssec.example.zone");
+
+/// Strings that break naive quoting: quotes, backslashes, newlines and
+/// record-like text, comment and grouping characters, control bytes and
+/// non-ASCII text. The first is the F2 injection payload.
+const NASTY: &[&str] = &[
+    "x\\\"\nevil 300 IN A 6.6.6.6\n;",
+    "\"",
+    "\\",
+    "ends with backslash\\",
+    "\\\"",
+    "semi; (paren) $ORIGIN evil.",
+    "tab\tcr\rnul\0del\u{7f}",
+    "caf\u{e9} \u{2028} \u{1f600}",
+    "\\010 literal backslash-digits",
+];
+
+fn record(name: &str, rdata: RData) -> Entry {
+    Entry::Record(ResourceRecord {
+        name: Some(Name::new(name)),
+        ttl: None,
+        class: None,
+        rdata,
+    })
+}
+
+fn sentinel() -> Entry {
+    record("sentinel", RData::A("192.0.2.9".parse().unwrap()))
+}
+
+/// A zone whose every character-string field holds `s`, followed by a
+/// sentinel A record that must still be the last record after a round trip.
+fn string_zone(s: &str) -> ZoneFile {
+    let svcb = SvcbData {
+        priority: 1,
+        target: Name::new("."),
+        params: vec![SvcParam {
+            key: "key65000".into(),
+            value: Some(s.into()),
+        }],
+    };
+    ZoneFile {
+        entries: vec![
+            Entry::Include {
+                file: s.into(),
+                origin: None,
+            },
+            record("t", RData::Txt(vec![s.into(), s.into()])),
+            record(
+                "h",
+                RData::Hinfo {
+                    cpu: s.into(),
+                    os: s.into(),
+                },
+            ),
+            record(
+                "c",
+                RData::Caa(CaaData {
+                    flags: 0,
+                    tag: "issue".into(),
+                    value: s.into(),
+                }),
+            ),
+            record(
+                "n",
+                RData::Naptr(NaptrData {
+                    order: 1,
+                    preference: 1,
+                    flags: s.into(),
+                    service: s.into(),
+                    regexp: s.into(),
+                    replacement: Name::new("."),
+                }),
+            ),
+            record("s", RData::Svcb(svcb)),
+            sentinel(),
+        ],
+    }
+}
+
+#[test]
+fn every_character_string_round_trips_exactly() {
+    for s in NASTY.iter().chain(&[""]) {
+        let zone = string_zone(s);
+        let written = write(&zone);
+        assert_eq!(parse(&written), zone, "string {s:?} written as:\n{written}");
+        assert_eq!(
+            written.lines().count(),
+            zone.entries.len(),
+            "string {s:?} changed the line structure:\n{written}"
+        );
+    }
+}
+
+#[test]
+fn names_cannot_inject_and_rewrite_idempotently() {
+    for s in NASTY {
+        let zone = ZoneFile {
+            entries: vec![
+                Entry::Origin(Name::new(*s)),
+                record(s, RData::Cname(Name::new(*s))),
+                sentinel(),
+            ],
+        };
+        let written = write(&zone);
+        let reparsed = parse(&written);
+        let rtypes: Vec<_> = reparsed
+            .records()
+            .map(|r| r.rdata.rtype().to_owned())
+            .collect();
+        assert_eq!(rtypes, ["CNAME", "A"], "name {s:?} written as:\n{written}");
+        assert_eq!(reparsed.entries.len(), zone.entries.len(), "{written}");
+        assert_eq!(write(&reparsed), written, "name {s:?} is not stable");
+    }
+}
+
+#[test]
+fn escaped_presentation_names_round_trip_exactly() {
+    let zone = assert_round_trip(
+        "esc\\.dot IN TXT \"x\"\n\
+         sp\\032ace IN TXT \"y\"\n\
+         \\$dollar IN TXT \"z\"\n\
+         0/26 IN NS ns1.example.com.\n",
+    );
+    let names: Vec<_> = zone
+        .records()
+        .map(|r| r.name.clone().expect("owner"))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            Name::new("esc\\.dot"),
+            Name::new("sp\\032ace"),
+            Name::new("\\$dollar"),
+            Name::new("0/26"),
+        ]
+    );
+}
+
+#[test]
+fn records_fixture_round_trips_with_every_record_typed() {
+    let zone = assert_round_trip(RECORDS_ZONE);
+    assert!(zone.records().any(|r| matches!(r.rdata, RData::Loc(_))));
+    assert!(
+        !zone
+            .records()
+            .any(|r| matches!(r.rdata, RData::Unknown { .. })),
+        "every record in the fixture should be typed"
+    );
+}
+
+#[test]
+fn dnssec_fixture_round_trips_with_every_record_typed() {
+    let zone = assert_round_trip(DNSSEC_ZONE);
+    let rtypes: Vec<_> = zone.records().map(|r| r.rdata.rtype().to_owned()).collect();
+    for expected in ["RRSIG", "NSEC3", "NSEC3PARAM"] {
+        assert!(
+            rtypes.iter().any(|t| t == expected),
+            "{expected}: {rtypes:?}"
+        );
+    }
+    assert!(
+        !zone
+            .records()
+            .any(|r| matches!(r.rdata, RData::Unknown { .. })),
+        "every record in the fixture should be typed"
+    );
+}
+
+/// Keeps `MODELLED_RTYPES` honest: in the fixtures (which cover each type
+/// hornet models) no record of a modelled type is kept verbatim, and every
+/// type that parses typed is in the list.
+#[test]
+fn every_fixture_record_is_typed_and_listed_as_modelled() {
+    for text in [
+        FORWARD_ZONE,
+        REVERSE_ZONE,
+        EVERY_TYPE,
+        RECORDS_ZONE,
+        DNSSEC_ZONE,
+    ] {
+        for record in parse(text).records() {
+            let rtype = record.rdata.rtype();
+            let verbatim = matches!(record.rdata, RData::Unknown { .. });
+            assert_eq!(
+                MODELLED_RTYPES.contains(&rtype),
+                !verbatim,
+                "{rtype}: modelled={}, kept verbatim={verbatim}",
+                MODELLED_RTYPES.contains(&rtype)
+            );
+        }
+    }
 }

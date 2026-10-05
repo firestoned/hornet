@@ -41,8 +41,8 @@ Options:
 | [`zone`](./zone.md) | Parse and pretty-print a zone file | No | Parse error |
 | [`check`](./check.md) | Validate a `named.conf`, print diagnostics | No | Errors (and warnings by default) |
 | [`check-zone`](./check-zone.md) | Validate a zone file | No | Errors (and warnings by default) |
-| [`fmt`](./fmt.md) | Reformat a `named.conf` in-place | Yes (without `--check`) | Parse error; `--check` exits 1 if file would change |
-| [`convert`](./convert.md) | Convert legacy keywords to modern equivalents | Yes (with `--in-place`) | Parse error |
+| [`fmt`](./fmt.md) | Reformat a `named.conf` in-place | Yes (without `--check`) | Parse error; file has comments (without `--force`); `--check` exits 1 if file would change |
+| [`convert`](./convert.md) | Convert legacy keywords to modern equivalents | Yes (with `--in-place`) | Parse error; `--in-place` on a file with comments (without `--force`) |
 
 ---
 
@@ -51,6 +51,23 @@ Options:
 All commands exit `0` on success and `1` on failure.
 `check` and `check-zone` treat validation errors as failures by default;
 pass `--allow-warnings` to exit `0` even when warnings are found (errors still cause exit `1`).
+
+---
+
+## Comments
+
+Hornet's AST does not keep comments, so any output it writes has none.
+
+- `parse`, `zone` and `convert` (to stdout) print a warning on stderr when the
+  input had comments.
+- `fmt` and `convert --in-place` **refuse** to rewrite a file that contains
+  comments, exit `1`, and leave the file untouched. Pass `--force` to rewrite
+  it anyway; a warning on stderr confirms the comments were removed.
+- `fmt --check` ignores comments: a file that is formatted apart from its
+  comments passes.
+
+Comment markers inside quoted strings (`"db#1"`, `"v=DKIM1; k=rsa"`) are data,
+not comments.
 
 ---
 

@@ -6,9 +6,9 @@ mod tests {
     use std::io::Write;
 
     use super::super::{
-        parse_named_conf, parse_named_conf_file, parse_zone_file, parse_zone_file_from_path,
-        validate_named_conf, validate_zone_file, write_named_conf, write_zone_file,
-        writer::WriteOptions, Error, Severity,
+        parse_named_conf, parse_named_conf_file, parse_named_conf_source, parse_zone_file,
+        parse_zone_file_from_path, parse_zone_file_source, validate_named_conf, validate_zone_file,
+        write_named_conf, write_zone_file, writer::WriteOptions, Error, Severity,
     };
 
     const VALID_CONF: &str =
@@ -46,6 +46,30 @@ mod tests {
             }
             other => panic!("expected Error::Parse, got {other:?}"),
         }
+    }
+
+    // ── parse_*_source ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_named_conf_source_valid() {
+        let conf = parse_named_conf_source("named.conf", VALID_CONF).expect("valid config");
+        assert_eq!(conf, parse_named_conf(VALID_CONF).expect("valid config"));
+    }
+
+    #[test]
+    fn test_parse_named_conf_source_error_names_the_source() {
+        let err = parse_named_conf_source("/etc/bind/named.conf", INVALID_CONF)
+            .expect_err("stray brace is rejected");
+        match err {
+            Error::Parse { file, .. } => assert_eq!(file, "/etc/bind/named.conf"),
+            other => panic!("expected Error::Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_zone_file_source_valid() {
+        let zone = parse_zone_file_source("example.com.zone", VALID_ZONE).expect("valid zone");
+        assert_eq!(zone, parse_zone_file(VALID_ZONE).expect("valid zone"));
     }
 
     // ── parse_named_conf_file ────────────────────────────────────────────────────

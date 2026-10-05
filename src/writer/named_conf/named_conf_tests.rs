@@ -5,11 +5,12 @@
 mod tests {
     use super::super::write_named_conf;
     use crate::ast::named_conf::{
-        AclStmt, AddressMatchElement, ControlsBlock, DnsClass, DnssecValidation, ForwardPolicy,
-        InetControl, KeyStmt, ListenOn, LogCategory, LogChannel, LogDestination, LogSeverity,
-        LogVersions, LoggingBlock, NamedConf, NotifyOption, OptionsBlock, PrimariesStmt,
-        RemoteServer, ServerOptions, ServerStmt, SizeSpec, Statement, SyslogFacility, ViewOptions,
-        ViewStmt, ZoneOptions, ZoneStmt, ZoneType,
+        AclStmt, AddressMatchElement, AutoDnssec, CheckNames, ControlsBlock, DnsClass,
+        DnssecValidation, ForwardPolicy, InetControl, KeyStmt, ListenOn, LogCategory, LogChannel,
+        LogDestination, LogSeverity, LogVersions, LoggingBlock, NamedConf, NotifyOption,
+        OptionsBlock, PrimariesStmt, RateLimit, RemoteServer, ResponsePolicy, ServerOptions,
+        ServerStmt, SizeSpec, Statement, SyslogFacility, TransferFormat, UnixControl, UpdateAction,
+        UpdatePolicy, UpdatePolicyRule, ViewOptions, ViewStmt, ZoneOptions, ZoneStmt, ZoneType,
     };
     use crate::writer::WriteOptions;
 
@@ -971,10 +972,10 @@ mod tests {
             (ZoneType::Forward, "type forward;"),
             (ZoneType::Hint, "type hint;"),
             (ZoneType::Redirect, "type redirect;"),
-            (ZoneType::Delegation, "type delegation;"),
+            (ZoneType::Delegation, "type delegation-only;"),
             (
                 ZoneType::InView("internal".to_string()),
-                "type in-view \"internal\";",
+                "in-view \"internal\";",
             ),
             (ZoneType::Static, "type static-stub;"),
         ];
@@ -992,10 +993,10 @@ mod tests {
             (ZoneType::Forward, "type forward;"),
             (ZoneType::Hint, "type hint;"),
             (ZoneType::Redirect, "type redirect;"),
-            (ZoneType::Delegation, "type delegation;"),
+            (ZoneType::Delegation, "type delegation-only;"),
             (
                 ZoneType::InView("internal".to_string()),
-                "type in-view \"internal\";",
+                "in-view \"internal\";",
             ),
             (ZoneType::Static, "type static-stub;"),
         ];
@@ -1096,7 +1097,7 @@ mod tests {
             Statement::Zone(zone("example.com", ZoneOptions::default())),
             &opts,
         );
-        assert_eq!(out, "zone \"example.com\" {\n};\n");
+        assert_eq!(out, "zone \"example.com\" IN {\n};\n");
     }
 
     #[test]
@@ -1601,5 +1602,580 @@ mod tests {
             }),
             "dlz;\n"
         );
+    }
+
+    // ── injection safety: bareword positions (F3) ───────────────────────────────
+
+    fn allow_query_line(elems: Vec<AddressMatchElement>) -> String {
+        let out = render(Statement::Options(OptionsBlock {
+            allow_query: Some(elems),
+            ..Default::default()
+        }));
+        out.lines().nth(1).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn test_write_acl_ref_plain_identifier_is_bareword() {
+        assert_eq!(
+            allow_query_line(vec![AddressMatchElement::AclRef(
+                "trusted-nets_2.x".to_string()
+            )]),
+            "allow-query { trusted-nets_2.x; };"
+        );
+    }
+
+    #[test]
+    fn test_write_acl_ref_with_syntax_characters_is_quoted() {
+        let line = allow_query_line(vec![AddressMatchElement::AclRef(
+            "x; }; allow-update { any".to_string(),
+        )]);
+        assert_eq!(line, "allow-query { \"x; }; allow-update { any\"; };");
+    }
+
+    #[test]
+    fn test_write_acl_ref_quote_and_backslash_are_escaped() {
+        let line = allow_query_line(vec![AddressMatchElement::AclRef("a\"b\\c".to_string())]);
+        assert_eq!(line, r#"allow-query { "a\"b\\c"; };"#);
+    }
+
+    #[test]
+    fn test_write_acl_ref_newline_stays_inside_the_quoted_string() {
+        let out = render(Statement::Options(OptionsBlock {
+            allow_query: Some(vec![AddressMatchElement::AclRef(
+                "x;\n};\nzone \"evil\" { type primary; file \"/etc/passwd\";".to_string(),
+            )]),
+            ..Default::default()
+        }));
+        assert_eq!(
+            out,
+            "options {\n    allow-query { \"x;\n};\nzone \\\"evil\\\" { type primary; file \\\"/etc/passwd\\\";\"; };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_acl_ref_reserved_or_address_like_names_are_quoted() {
+        for name in [
+            "any",
+            "None",
+            "localhost",
+            "LOCALNETS",
+            "key",
+            "10net",
+            "10.0.0.1",
+            "",
+        ] {
+            let line = allow_query_line(vec![AddressMatchElement::AclRef(name.to_string())]);
+            assert_eq!(line, format!("allow-query {{ \"{name}\"; }};"), "{name}");
+        }
+    }
+
+    #[test]
+    fn test_write_negated_unsafe_acl_ref_is_quoted() {
+        let line = allow_query_line(vec![AddressMatchElement::Negated(Box::new(
+            AddressMatchElement::AclRef("bad name".to_string()),
+        ))]);
+        assert_eq!(line, "allow-query { !\"bad name\"; };");
+    }
+
+    #[test]
+    fn test_write_aml_key_name_is_escaped() {
+        let line = allow_query_line(vec![AddressMatchElement::Key("k\"; any; \"".to_string())]);
+        assert_eq!(line, r#"allow-query { key "k\"; any; \""; };"#);
+    }
+
+    #[test]
+    fn test_write_key_algorithm_with_syntax_characters_is_quoted() {
+        let out = render(Statement::Key(KeyStmt {
+            name: "k".to_string(),
+            algorithm: "hmac-sha256; }; options { allow-update { any; }".to_string(),
+            secret: "c2VjcmV0".to_string(),
+        }));
+        assert_eq!(
+            out,
+            "key \"k\" {\n    algorithm \"hmac-sha256; }; options { allow-update { any; }\";\n    secret \"c2VjcmV0\";\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_key_algorithm_with_quote_is_escaped() {
+        let out = render(Statement::Key(KeyStmt {
+            name: "k".to_string(),
+            algorithm: "a\"b".to_string(),
+            secret: "s".to_string(),
+        }));
+        assert!(out.contains(r#"algorithm "a\"b";"#), "{out}");
+    }
+
+    #[test]
+    fn test_write_in_view_name_is_escaped() {
+        let line = zone_type_line(ZoneType::InView("a\"; type primary; \"".to_string()), true);
+        assert_eq!(line, r#"in-view "a\"; type primary; \"";"#);
+    }
+
+    // ── explicit_class ──────────────────────────────────────────────────────────
+
+    fn view(name: &str, class: Option<DnsClass>, zones: Vec<ZoneStmt>) -> Statement {
+        Statement::View(ViewStmt {
+            name: name.to_string(),
+            class,
+            options: ViewOptions {
+                zones,
+                ..Default::default()
+            },
+        })
+    }
+
+    fn explicit_class_opts() -> WriteOptions {
+        WriteOptions {
+            explicit_class: true,
+            ..WriteOptions::default()
+        }
+    }
+
+    #[test]
+    fn test_write_view_without_class_with_explicit_class_option_emits_in() {
+        let out = render_with(view("v", None, vec![]), &explicit_class_opts());
+        assert_eq!(out, "view \"v\" IN {\n};\n");
+    }
+
+    #[test]
+    fn test_write_view_without_class_without_explicit_class_option_emits_none() {
+        let out = render(view("v", None, vec![]));
+        assert_eq!(out, "view \"v\" {\n};\n");
+    }
+
+    #[test]
+    fn test_write_zone_in_view_inherits_view_class_with_explicit_class_option() {
+        let out = render_with(
+            view(
+                "chaos",
+                Some(DnsClass::Chaos),
+                vec![zone("bind", ZoneOptions::default())],
+            ),
+            &explicit_class_opts(),
+        );
+        assert_eq!(
+            out,
+            "view \"chaos\" CHAOS {\n    zone \"bind\" CHAOS {\n    };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_in_classless_view_gets_in_with_explicit_class_option() {
+        let out = render_with(
+            view("v", None, vec![zone("example.com", ZoneOptions::default())]),
+            &explicit_class_opts(),
+        );
+        assert_eq!(
+            out,
+            "view \"v\" IN {\n    zone \"example.com\" IN {\n    };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_own_class_wins_over_view_class() {
+        let out = render_with(
+            view(
+                "v",
+                Some(DnsClass::Chaos),
+                vec![ZoneStmt {
+                    name: "z".to_string(),
+                    class: Some(DnsClass::Hs),
+                    options: ZoneOptions::default(),
+                }],
+            ),
+            &explicit_class_opts(),
+        );
+        assert_eq!(out, "view \"v\" CHAOS {\n    zone \"z\" HS {\n    };\n};\n");
+    }
+
+    // ── empty address-match lists ───────────────────────────────────────────────
+
+    #[test]
+    fn test_write_empty_address_match_list_has_no_stray_semicolon() {
+        assert_eq!(allow_query_line(vec![]), "allow-query { };");
+    }
+
+    #[test]
+    fn test_write_empty_listen_on_list() {
+        let out = render(Statement::Options(OptionsBlock {
+            listen_on: vec![ListenOn {
+                port: None,
+                addresses: vec![],
+            }],
+            ..Default::default()
+        }));
+        assert_eq!(out, "options {\n    listen-on { };\n};\n");
+    }
+
+    #[test]
+    fn test_write_empty_controls_allow_list() {
+        let out = render(Statement::Controls(ControlsBlock {
+            inet: vec![InetControl {
+                address: ip("127.0.0.1"),
+                port: 953,
+                allow: vec![],
+                keys: vec![],
+                read_only: None,
+            }],
+            unix: vec![],
+        }));
+        assert_eq!(
+            out,
+            "controls {\n    inet 127.0.0.1 port 953 allow { };\n};\n"
+        );
+    }
+
+    // ── options fields that used to be dropped ──────────────────────────────────
+
+    #[test]
+    fn test_write_options_file_and_ttl_fields() {
+        let out = render(Statement::Options(OptionsBlock {
+            memstatistics_file: Some("/var/cache/bind/mem.stats".to_string()),
+            session_keyfile: Some("/run/named/session.key".to_string()),
+            allow_update: Some(vec![AddressMatchElement::None]),
+            dnssec_enable: Some(true),
+            max_cache_ttl: Some(3600),
+            min_cache_ttl: Some(60),
+            ..Default::default()
+        }));
+        assert_eq!(
+            out,
+            "options {\n    memstatistics-file \"/var/cache/bind/mem.stats\";\n    session-keyfile \"/run/named/session.key\";\n    allow-update { none; };\n    dnssec-enable yes;\n    max-cache-ttl 3600;\n    min-cache-ttl 60;\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_options_rate_limit_every_field() {
+        let out = render(Statement::Options(OptionsBlock {
+            rate_limit: Some(RateLimit {
+                responses_per_second: Some(5),
+                referrals_per_second: Some(6),
+                nodata_per_second: Some(7),
+                nxdomains_per_second: Some(8),
+                errors_per_second: Some(9),
+                all_per_second: Some(20),
+                window: Some(15),
+                log_only: Some(true),
+                slip: Some(2),
+            }),
+            ..Default::default()
+        }));
+        assert_eq!(
+            out,
+            "options {\n    rate-limit {\n        responses-per-second 5;\n        referrals-per-second 6;\n        nodata-per-second 7;\n        nxdomains-per-second 8;\n        errors-per-second 9;\n        all-per-second 20;\n        window 15;\n        log-only yes;\n        slip 2;\n    };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_options_rate_limit_empty() {
+        let out = render(Statement::Options(OptionsBlock {
+            rate_limit: Some(RateLimit::default()),
+            ..Default::default()
+        }));
+        assert_eq!(out, "options {\n    rate-limit {\n    };\n};\n");
+    }
+
+    #[test]
+    fn test_write_options_response_policy() {
+        let out = render(Statement::Options(OptionsBlock {
+            response_policy: vec![
+                ResponsePolicy {
+                    zone: "rpz.example".to_string(),
+                    policy: Some("given".to_string()),
+                },
+                ResponsePolicy {
+                    zone: "rpz2.example".to_string(),
+                    policy: Some("cname  example.com.".to_string()),
+                },
+                ResponsePolicy {
+                    zone: "rpz3.example".to_string(),
+                    policy: None,
+                },
+            ],
+            ..Default::default()
+        }));
+        assert_eq!(
+            out,
+            "options {\n    response-policy {\n        zone \"rpz.example\" policy given;\n        zone \"rpz2.example\" policy cname example.com.;\n        zone \"rpz3.example\";\n    };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_response_policy_with_syntax_characters_is_quoted() {
+        let out = render(Statement::Options(OptionsBlock {
+            response_policy: vec![ResponsePolicy {
+                zone: "z\"".to_string(),
+                policy: Some("given; }; allow-update { any; }".to_string()),
+            }],
+            ..Default::default()
+        }));
+        assert!(
+            out.contains(r#"zone "z\"" policy "given;" "};" allow-update "{" "any;" "}";"#),
+            "{out}"
+        );
+    }
+
+    // ── zone fields that used to be dropped ─────────────────────────────────────
+
+    fn zone_body(options: ZoneOptions) -> String {
+        render(Statement::Zone(zone("example.com", options)))
+    }
+
+    #[test]
+    fn test_write_zone_update_policy() {
+        let out = zone_body(ZoneOptions {
+            update_policy: Some(UpdatePolicy {
+                rules: vec![
+                    UpdatePolicyRule {
+                        action: UpdateAction::Grant,
+                        identity: "k1".to_string(),
+                        name_type: "zonesub".to_string(),
+                        name: None,
+                        types: vec!["ANY".to_string()],
+                    },
+                    UpdatePolicyRule {
+                        action: UpdateAction::Deny,
+                        identity: "k1.".to_string(),
+                        name_type: "name".to_string(),
+                        name: Some("host.example.com".to_string()),
+                        types: vec!["A".to_string(), "AAAA".to_string()],
+                    },
+                ],
+            }),
+            ..Default::default()
+        });
+        assert_eq!(
+            out,
+            "zone \"example.com\" {\n    update-policy {\n        grant \"k1\" zonesub ANY;\n        deny \"k1.\" name \"host.example.com\" A AAAA;\n    };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_update_policy_rule_fields_cannot_break_out() {
+        let out = zone_body(ZoneOptions {
+            update_policy: Some(UpdatePolicy {
+                rules: vec![UpdatePolicyRule {
+                    action: UpdateAction::Grant,
+                    identity: "k\"; grant * zonesub ANY; \"".to_string(),
+                    name_type: "zonesub; grant".to_string(),
+                    name: Some("n\"".to_string()),
+                    types: vec!["A;".to_string()],
+                }],
+            }),
+            ..Default::default()
+        });
+        assert!(
+            out.contains(r#"grant "k\"; grant * zonesub ANY; \"" "zonesub; grant" "n\"" "A;";"#),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_empty_update_policy() {
+        let out = zone_body(ZoneOptions {
+            update_policy: Some(UpdatePolicy { rules: vec![] }),
+            ..Default::default()
+        });
+        assert_eq!(
+            out,
+            "zone \"example.com\" {\n    update-policy {\n    };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_forwarders_journal_and_sources() {
+        let out = zone_body(ZoneOptions {
+            forward: Some(ForwardPolicy::Only),
+            forwarders: vec![ip("192.0.2.53"), ip("2001:db8::53")],
+            notify_source: Some(ip("192.0.2.1")),
+            journal: Some("/var/cache/bind/example.com.jnl".to_string()),
+            max_journal_size: Some(SizeSpec::Megabytes(10)),
+            ..Default::default()
+        });
+        assert_eq!(
+            out,
+            "zone \"example.com\" {\n    notify-source 192.0.2.1;\n    forward only;\n    forwarders {\n        192.0.2.53;\n        2001:db8::53;\n    };\n    journal \"/var/cache/bind/example.com.jnl\";\n    max-journal-size 10m;\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_ipv6_notify_source_uses_v6_keyword() {
+        let out = zone_body(ZoneOptions {
+            notify_source: Some(ip("2001:db8::1")),
+            ..Default::default()
+        });
+        assert_eq!(
+            out,
+            "zone \"example.com\" {\n    notify-source-v6 2001:db8::1;\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_check_names_and_auto_dnssec_every_value() {
+        let cases = [
+            (CheckNames::Fail, AutoDnssec::Allow, "fail", "allow"),
+            (CheckNames::Warn, AutoDnssec::Maintain, "warn", "maintain"),
+            (CheckNames::Ignore, AutoDnssec::Off, "ignore", "off"),
+        ];
+        for (cn, ad, cn_text, ad_text) in cases {
+            let out = zone_body(ZoneOptions {
+                check_names: Some(cn),
+                auto_dnssec: Some(ad),
+                ..Default::default()
+            });
+            assert_eq!(
+                out,
+                format!(
+                    "zone \"example.com\" {{\n    check-names {cn_text};\n    auto-dnssec {ad_text};\n}};\n"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn test_write_zone_masters_field_written_when_primaries_absent() {
+        let out = zone_body(ZoneOptions {
+            masters: Some(vec![AddressMatchElement::Ip(ip("192.0.2.1"))]),
+            ..Default::default()
+        });
+        assert_eq!(
+            out,
+            "zone \"example.com\" {\n    primaries { 192.0.2.1; };\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_zone_primaries_field_wins_over_masters_field() {
+        let out = zone_body(ZoneOptions {
+            primaries: Some(vec![AddressMatchElement::Ip(ip("192.0.2.1"))]),
+            masters: Some(vec![AddressMatchElement::Ip(ip("192.0.2.2"))]),
+            ..Default::default()
+        });
+        assert_eq!(
+            out,
+            "zone \"example.com\" {\n    primaries { 192.0.2.1; };\n};\n"
+        );
+    }
+
+    // ── server fields that used to be dropped ───────────────────────────────────
+
+    #[test]
+    fn test_write_server_every_ipv4_field() {
+        let out = render(Statement::Server(ServerStmt {
+            address: ip("192.0.2.9"),
+            options: ServerOptions {
+                transfer_format: Some(TransferFormat::ManyAnswers),
+                transfer_source: Some(ip("192.0.2.1")),
+                notify_source: Some(ip("192.0.2.2")),
+                query_source: Some(ip("192.0.2.3")),
+                request_nsid: Some(true),
+                send_cookie: Some(false),
+                edns: Some(true),
+                edns_version: Some(0),
+                ..Default::default()
+            },
+        }));
+        assert_eq!(
+            out,
+            "server 192.0.2.9 {\n    transfer-format many-answers;\n    transfer-source 192.0.2.1;\n    notify-source 192.0.2.2;\n    query-source address 192.0.2.3;\n    request-nsid yes;\n    send-cookie no;\n    edns yes;\n    edns-version 0;\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_server_ipv6_sources_use_v6_keywords() {
+        let out = render(Statement::Server(ServerStmt {
+            address: ip("2001:db8::9"),
+            options: ServerOptions {
+                transfer_format: Some(TransferFormat::OneAnswer),
+                transfer_source: Some(ip("2001:db8::1")),
+                notify_source: Some(ip("2001:db8::2")),
+                query_source: Some(ip("2001:db8::3")),
+                ..Default::default()
+            },
+        }));
+        assert_eq!(
+            out,
+            "server 2001:db8::9 {\n    transfer-format one-answer;\n    transfer-source-v6 2001:db8::1;\n    notify-source-v6 2001:db8::2;\n    query-source-v6 address 2001:db8::3;\n};\n"
+        );
+    }
+
+    // ── primaries: tls written, dscp not (BIND has no per-server dscp) ──────────
+
+    #[test]
+    fn test_write_primaries_server_tls_and_no_dscp() {
+        let out = render(Statement::Primaries(PrimariesStmt {
+            name: "upstream".to_string(),
+            servers: vec![RemoteServer {
+                address: ip("192.0.2.1"),
+                port: Some(853),
+                dscp: Some(10),
+                key: Some("k1".to_string()),
+                tls: Some("ephemeral".to_string()),
+            }],
+        }));
+        assert_eq!(
+            out,
+            "primaries \"upstream\" {\n    192.0.2.1 port 853 key \"k1\" tls \"ephemeral\";\n};\n"
+        );
+    }
+
+    // ── controls: unix ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_write_controls_unix_every_field() {
+        let out = render(Statement::Controls(ControlsBlock {
+            inet: vec![],
+            unix: vec![UnixControl {
+                path: "/run/named/ctl".to_string(),
+                perm: Some(0o600),
+                owner: Some(0),
+                group: Some(101),
+                keys: vec!["k1".to_string()],
+                read_only: Some(true),
+            }],
+        }));
+        assert_eq!(
+            out,
+            "controls {\n    unix \"/run/named/ctl\" perm 384 owner 0 group 101 keys { \"k1\"; } read-only yes;\n};\n"
+        );
+    }
+
+    #[test]
+    fn test_write_controls_unix_path_only() {
+        let out = render(Statement::Controls(ControlsBlock {
+            inet: vec![],
+            unix: vec![UnixControl {
+                path: "/run/a\"b".to_string(),
+                perm: None,
+                owner: None,
+                group: None,
+                keys: vec![],
+                read_only: None,
+            }],
+        }));
+        assert_eq!(out, "controls {\n    unix \"/run/a\\\"b\";\n};\n");
+    }
+
+    #[test]
+    fn test_write_response_policy_blank_policy_is_quoted_empty() {
+        let out = render(Statement::Options(OptionsBlock {
+            response_policy: vec![ResponsePolicy {
+                zone: "rpz.example".to_string(),
+                policy: Some("  ".to_string()),
+            }],
+            ..Default::default()
+        }));
+        assert!(out.contains("zone \"rpz.example\" policy \"  \";"), "{out}");
+    }
+
+    #[test]
+    fn test_write_key_algorithm_non_ascii_is_quoted() {
+        let out = render(Statement::Key(KeyStmt {
+            name: "k".to_string(),
+            algorithm: "hmäc".to_string(),
+            secret: "s".to_string(),
+        }));
+        assert!(out.contains("algorithm \"hmäc\";"), "{out}");
     }
 }

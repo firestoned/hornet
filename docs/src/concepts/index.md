@@ -34,15 +34,15 @@ Hornet handles two distinct BIND9 file formats, each with its own AST:
 
 | File type | Parse function | AST root | Write function |
 |---|---|---|---|
-| `named.conf` | `parse_named_conf()` / `parse_named_conf_file()` | `NamedConf` | `write_named_conf()` |
-| Zone file | `parse_zone_file()` / `parse_zone_file_from_path()` | `ZoneFile` | `write_zone_file()` |
+| `named.conf` | `parse_named_conf()` / `parse_named_conf_source()` / `parse_named_conf_file()` | `NamedConf` | `write_named_conf()` |
+| Zone file | `parse_zone_file()` / `parse_zone_file_source()` / `parse_zone_file_from_path()` | `ZoneFile` | `write_zone_file()` |
 
 Both follow the same ergonomic pattern:
 
 ```rust
-let ast  = hornet::parse_named_conf(text)?;
-let diag = hornet::validate_named_conf(&ast);
-let out  = hornet::write_named_conf(&ast, &WriteOptions::default());
+let ast  = hornet_bind9::parse_named_conf(text)?;
+let diag = hornet_bind9::validate_named_conf(&ast);
+let out  = hornet_bind9::write_named_conf(&ast, &WriteOptions::default());
 ```
 
 ---

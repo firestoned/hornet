@@ -38,7 +38,11 @@ pub enum Entry {
 
 // ── Names ─────────────────────────────────────────────────────────────────────
 
-/// A DNS name — either absolute (ends with `.`) or relative.
+/// A DNS name, either absolute (ends with `.`) or relative, held in
+/// presentation format: labels separated by `.`, with RFC 1035 section 5.1
+/// escapes (`\.`, `\$`, `\032`) kept as written. The writer escapes any
+/// character that would otherwise end the name's token, so an unescaped
+/// value (`"a b"`) is written as `a\032b` and parses back in that form.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Name(pub String);
 
@@ -164,6 +168,38 @@ impl RData {
         }
     }
 }
+
+/// Record types hornet parses into a typed [`RData`] variant (`ALIAS` is read
+/// as [`RData::Aname`]). A record of one of these types that ends up as
+/// [`RData::Unknown`] had data its type's parser could not read: it was kept
+/// verbatim rather than dropped, and the validator warns about it.
+pub const MODELLED_RTYPES: &[&str] = &[
+    "A",
+    "AAAA",
+    "NS",
+    "CNAME",
+    "PTR",
+    "MX",
+    "SOA",
+    "TXT",
+    "HINFO",
+    "SRV",
+    "CAA",
+    "SSHFP",
+    "TLSA",
+    "NAPTR",
+    "LOC",
+    "DS",
+    "DNSKEY",
+    "RRSIG",
+    "NSEC",
+    "NSEC3",
+    "NSEC3PARAM",
+    "HTTPS",
+    "SVCB",
+    "ANAME",
+    "ALIAS",
+];
 
 // ── Per-type structs ──────────────────────────────────────────────────────────
 

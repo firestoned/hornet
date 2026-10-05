@@ -2,9 +2,10 @@
 ; SPDX-License-Identifier: Apache-2.0
 ;
 ; Every RR type hornet models that BIND9 also serves, plus $ORIGIN changes,
-; per-record TTLs, a wildcard and a multi-string TXT. TXT records sit at the
-; end of the file on purpose: the record after a TXT is a known parser bug
-; (tests/e2e/known-failures.txt) and is covered by example.com.zone.
+; per-record TTLs, a wildcard, a multi-string TXT, and RFC 1035 section 5.1
+; escapes in names and character-strings. The `inject` TXT holds text that
+; looks like a record after a quote and a newline; BIND9 must read it back
+; from hornet's output as the same single string.
 $TTL 3600
 $ORIGIN records.example.
 
@@ -44,3 +45,12 @@ mail            IN  MX      5 www
 
 $ORIGIN records.example.
 @               IN  TXT     "v=spf1" "a" "mx" "-all"
+inject          IN  TXT     "x\\\"\010evil 300 IN A 6.6.6.6\010;"
+quotes          IN  TXT     "escaped \"quote\" and \\backslash\\" "semi;colon (paren)"
+controls        IN  TXT     "line\010break" "tab\009" "caf\195\169"
+esc\.dot        IN  TXT     "owner with an escaped dot"
+sp\032ace       IN  TXT     "owner with an escaped space"
+\$dollar        IN  TXT     "owner starting with an escaped dollar"
+0/26            IN  TXT     "classless delegation style owner"
+host2           IN  HINFO   "x\"86" "Linux 6"
+@               IN  NAPTR   100 20 "U" "E2U+sip" "!^\\+44(.*)$!sip:\\1@records.example!" .

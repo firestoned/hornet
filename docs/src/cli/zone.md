@@ -49,6 +49,8 @@ hornet zone /etc/bind/zones/example.com.db > /tmp/example.com.db.formatted
 
 - Output is written to **stdout**; errors are written to **stderr**.
 - The source file is never modified.
+- Comments (`;`) are not included in the output. If the file has any, a warning
+  is printed on stderr. A `;` inside a quoted TXT string is data, not a comment.
 - `$INCLUDE` directives are recorded in the AST but not followed; included files are
   not read or output.
 

@@ -4,10 +4,11 @@
 #[cfg(test)]
 mod tests {
     use super::super::{
-        bareword, cidr, close_brace_semi, hex_string, ip_addr, quoted_string, semicolon, size_spec,
-        string_value, uint, unescape, ws, yes_no,
+        bareword, cidr, close_brace_semi, hex_string, ip_addr, keyword, literal, many0, optional,
+        quoted_string, semicolon, size_spec, skip_ws, string_value, uint, unescape, ws, yes_no,
     };
     use crate::ast::named_conf::SizeSpec;
+    use winnow::Parser;
 
     // ── ws tests ───────────────────────────────────────────────────────────────
 
@@ -92,11 +93,40 @@ mod tests {
 
     #[test]
     fn test_quoted_string_with_escaped_quote() {
-        // take_until(0.., '"') stops at the first '"' regardless of preceding backslash.
-        // So for `"say \"hi\""`, the content is `say \` (up to the first '"').
+        // An escaped quote is part of the string, not its end.
         let mut input = "\"say \\\"hi\\\"\"";
         let result = quoted_string(&mut input).unwrap();
-        assert_eq!(result, "say \\");
+        assert_eq!(result, "say \"hi\"");
+        assert_eq!(input, "");
+    }
+
+    #[test]
+    fn test_quoted_string_escaped_backslash_before_closing_quote() {
+        // `"a\\"` is the string `a\` followed by the closing quote.
+        let mut input = r#""a\\" rest"#;
+        assert_eq!(quoted_string(&mut input).unwrap(), "a\\");
+        assert_eq!(input, " rest");
+    }
+
+    #[test]
+    fn test_quoted_string_escaped_quote_only_is_unterminated() {
+        let mut input = r#""abc\""#;
+        assert!(quoted_string(&mut input).is_err());
+    }
+
+    #[test]
+    fn test_quoted_string_unterminated_is_an_error() {
+        let mut input = r#""abc"#;
+        assert!(quoted_string(&mut input).is_err());
+    }
+
+    #[test]
+    fn test_quoted_string_round_trips_writer_escaping() {
+        let original = r#"a"b\c"#;
+        let escaped = format!("\"{}\"", crate::writer::escape(original));
+        let mut input = escaped.as_str();
+        assert_eq!(quoted_string(&mut input).unwrap(), original);
+        assert_eq!(input, "");
     }
 
     #[test]
@@ -510,5 +540,150 @@ mod tests {
         let mut input = "/* never closed";
         ws(&mut input).unwrap();
         assert_eq!(input, "/* never closed");
+    }
+
+    // ── skip_ws (infallible) ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_skip_ws_skips_whitespace_and_every_comment_style() {
+        let mut input = " \t\r\n# hash\n// slash\n/* block\n */ rest";
+        skip_ws(&mut input);
+        assert_eq!(input, "rest");
+    }
+
+    #[test]
+    fn test_skip_ws_line_comment_at_end_of_input() {
+        let mut input = "  # trailing comment without newline";
+        skip_ws(&mut input);
+        assert_eq!(input, "");
+    }
+
+    #[test]
+    fn test_skip_ws_unterminated_block_comment_is_left_in_place() {
+        let mut input = "  /* never closed";
+        skip_ws(&mut input);
+        assert_eq!(input, "/* never closed");
+    }
+
+    #[test]
+    fn test_skip_ws_does_not_skip_non_ascii_whitespace() {
+        // BIND's lexer only treats space, tab, CR and LF as whitespace.
+        let mut input = "\u{a0}x";
+        skip_ws(&mut input);
+        assert_eq!(input, "\u{a0}x");
+    }
+
+    #[test]
+    fn test_ws_combinator_matches_skip_ws() {
+        let mut input = " /* c */ x";
+        ws.parse_next(&mut input).unwrap();
+        assert_eq!(input, "x");
+    }
+
+    // ── keyword / literal (whole word) ─────────────────────────────────────────
+
+    #[test]
+    fn test_keyword_is_case_insensitive() {
+        let mut input = "ZoNe \"a\"";
+        assert_eq!(keyword("zone").parse_next(&mut input).unwrap(), "ZoNe");
+        assert_eq!(input, " \"a\"");
+    }
+
+    #[test]
+    fn test_keyword_requires_a_word_boundary() {
+        for text in [
+            "zonex", "zone-a", "zone_a", "zone.a", "zone/a", "zone:a", "zone1",
+        ] {
+            let mut input = text;
+            assert!(keyword("zone").parse_next(&mut input).is_err(), "{text}");
+            assert_eq!(input, text, "{text}: input must be left untouched");
+        }
+    }
+
+    #[test]
+    fn test_keyword_accepts_punctuation_boundaries() {
+        for (text, rest) in [
+            ("zone{", "{"),
+            ("zone;", ";"),
+            ("zone\"a\"", "\"a\""),
+            ("zone", ""),
+        ] {
+            let mut input = text;
+            keyword("zone").parse_next(&mut input).unwrap();
+            assert_eq!(input, rest, "{text}");
+        }
+    }
+
+    #[test]
+    fn test_keyword_shorter_input_fails() {
+        let mut input = "zo";
+        assert!(keyword("zone").parse_next(&mut input).is_err());
+    }
+
+    #[test]
+    fn test_keyword_non_char_boundary_fails() {
+        // The fourth byte falls inside a multi-byte character.
+        let mut input = "zon\u{e9}";
+        assert!(keyword("zone").parse_next(&mut input).is_err());
+    }
+
+    #[test]
+    fn test_literal_is_case_sensitive_and_whole_word() {
+        let mut input = "any;";
+        assert_eq!(literal("any").parse_next(&mut input).unwrap(), "any");
+        assert_eq!(input, ";");
+        for text in ["ANY;", "anyone;"] {
+            let mut input = text;
+            assert!(literal("any").parse_next(&mut input).is_err(), "{text}");
+        }
+    }
+
+    // ── optional / many0 ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_optional_returns_value_on_success() {
+        let mut input = "42 rest";
+        assert_eq!(optional(&mut input, uint), Some(42));
+        assert_eq!(input, " rest");
+    }
+
+    #[test]
+    fn test_optional_restores_input_on_failure() {
+        let mut input = "12x";
+        // `(uint, 'y')` consumes the digits before failing on `x`.
+        assert_eq!(optional(&mut input, (uint, 'y')), None);
+        assert_eq!(input, "12x");
+    }
+
+    #[test]
+    fn test_many0_collects_until_the_parser_fails() {
+        let mut input = "1;2;3;x";
+        let items = many0(&mut input, (uint, ';').map(|(n, _)| n));
+        assert_eq!(items, vec![1, 2, 3]);
+        assert_eq!(input, "x");
+    }
+
+    #[test]
+    fn test_many0_restores_input_after_partial_match() {
+        let mut input = "1;2x";
+        let items = many0(&mut input, (uint, ';').map(|(n, _)| n));
+        assert_eq!(items, vec![1]);
+        assert_eq!(input, "2x");
+    }
+
+    #[test]
+    fn test_yes_no_requires_whole_word() {
+        let mut input = "yesterday";
+        assert!(yes_no(&mut input).is_err());
+        let mut input = "no;";
+        assert!(!yes_no(&mut input).unwrap());
+    }
+
+    #[test]
+    fn test_size_spec_keywords_require_whole_word() {
+        let mut input = "defaults";
+        assert!(size_spec(&mut input).is_err());
+        let mut input = "unlimited;";
+        assert_eq!(size_spec(&mut input).unwrap(), SizeSpec::Unlimited);
     }
 }

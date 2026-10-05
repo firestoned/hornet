@@ -1,9 +1,10 @@
 ; Copyright (c) 2025 Erick Bourgeois, firestoned
 ; SPDX-License-Identifier: Apache-2.0
 ;
-; DNSSEC record types as presentation data: DNSKEY, RRSIG and NSEC. The
-; signatures are not cryptographically valid; named-checkzone checks their
-; syntax, not the chain of trust.
+; DNSSEC record types as presentation data: DNSKEY, RRSIG (single-line and
+; multi-line), NSEC, NSEC3 and NSEC3PARAM. The signatures and hashes are not
+; cryptographically valid; named-checkzone checks their syntax, not the chain
+; of trust.
 $TTL 3600
 $ORIGIN dnssec.example.
 
@@ -20,3 +21,13 @@ ns1     IN  A       192.0.2.1
 ns1     IN  RRSIG   A 13 3 3600 20261101000000 20261001000000 12345 dnssec.example. r9kJydCun2C2enqn/d+vX8rwQyEsqmwqz6CjuF+zLqsclPoH4v5SiXjnnkKlOWdTDSQQGqY2CtIABeJ7CYCveQ==
 @       IN  NSEC    ns1.dnssec.example. NS SOA RRSIG NSEC DNSKEY
 ns1     IN  NSEC    dnssec.example. A RRSIG NSEC
+@       IN  RRSIG   NS 13 2 3600 (
+                20261101000000 20261001000000 12345 dnssec.example.
+                r9kJydCun2C2enqn/d+vX8rwQyEsqmwqz6CjuF+zLqsclPoH4v5Si
+                XjnnkKlOWdTDSQQGqY2CtIABeJ7CYCveQ== )
+@       IN  NSEC3PARAM 1 0 0 -
+0p9mhaveqvm6t7vbl5lop2u3t2rp3tom IN NSEC3 1 1 0 - (
+                2t7b4g4vsa5smi47k61mv5bv1a22bojr
+                NS SOA RRSIG DNSKEY NSEC3PARAM )
+2t7b4g4vsa5smi47k61mv5bv1a22bojr IN NSEC3 1 1 10 AABBCCDD (
+                0p9mhaveqvm6t7vbl5lop2u3t2rp3tom A RRSIG )

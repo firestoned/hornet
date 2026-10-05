@@ -1,6 +1,6 @@
 # Error Types
 
-Hornet defines its error types in `hornet::error`.
+Hornet defines its error types in `hornet_bind9::error`.
 
 ---
 
@@ -18,8 +18,8 @@ pub enum Error {
         span: miette::SourceSpan,
     },
 
-    /// One or more semantic validation errors.
-    Validation(Vec<ValidationError>),
+    /// A semantic validation finding.
+    Validation(ValidationError),
 
     /// An IO error reading a file.
     Io(std::io::Error),
@@ -31,17 +31,29 @@ pub enum Error {
 
 ### `Error::Parse`
 
-Returned by `parse_named_conf`, `parse_named_conf_file`, `parse_zone_file`, and
-`parse_zone_file_from_path` when the input text does not conform to the BIND9 grammar.
+Returned by `parse_named_conf`, `parse_named_conf_source`, `parse_named_conf_file`,
+`parse_zone_file`, `parse_zone_file_source` and `parse_zone_file_from_path` when the input
+text does not conform to the grammar.
 
 Fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `file` | `String` | Source file path, or `<input>` for string input |
+| `file` | `String` | Source name: the path for the file functions, the `source_name` argument for the `_source` functions, or `<input>` for plain string input |
 | `message` | `String` | Human-readable description of the parse failure |
-| `src` | `miette::NamedSource<String>` | Source text for pretty-printing |
-| `span` | `miette::SourceSpan` | Byte range of the offending token |
+| `src` | `miette::NamedSource<String>` | Source text, named like `file`, for pretty-printing |
+| `span` | `miette::SourceSpan` | Location of the failure (currently the start of the source) |
+
+Zone-file parsing returns `Error::Parse` for any logical line that is neither a record nor
+a known directive: an unknown `$` directive, a bad `$TTL` value, a line with no record
+type, or a bad owner name. The message names the line:
+
+```text
+line 7: cannot parse `$BOGUS 1`
+```
+
+Record data that does not match its type is **not** a parse error; it is kept verbatim and
+reported by the validator (see below).
 
 ### `Error::Io`
 
@@ -77,6 +89,27 @@ pub struct ValidationError {
 | `severity` | `Severity` | Diagnostic severity level |
 | `message` | `String` | Human-readable description |
 | `location` | `Option<ErrorLocation>` | Source location (line/column), if available |
+
+---
+
+### Zone-file diagnostics
+
+`validate_zone_file` emits these messages (`<...>` marks substituted values):
+
+```text
+error:   Zone file is missing a SOA record
+error:   Multiple SOA records found in zone file
+error:   Zone file is missing NS records
+error:   TXT record data exceeds 65535 bytes
+warning: TXT string of <N> bytes exceeds 255-byte chunk limit
+warning: MX exchange is '.' which means no mail server
+warning: CAA tag "<tag>" is not a standard tag
+warning: <TYPE> record data `<data>` is not valid <TYPE> syntax; kept verbatim
+```
+
+The last warning is new in 0.2.0. It fires for an `RData::Unknown` record whose `rtype`
+is listed in `hornet_bind9::ast::zone_file::MODELLED_RTYPES`: the parser kept data it
+could not read for that type instead of dropping the record.
 
 ---
 
@@ -124,23 +157,15 @@ pub struct ErrorLocation {
 with syntax highlighting when using `miette::IntoDiagnostic`:
 
 ```rust
-use miette::IntoDiagnostic;
-
 fn main() -> miette::Result<()> {
-    let conf = hornet::parse_named_conf_file(path).into_diagnostic()?;
+    let conf = hornet_bind9::parse_named_conf_file(path)?;
     Ok(())
 }
 ```
 
-Sample output:
-
-```
-Error:   × expected ';' after statement
-   ╭─[/etc/bind/named.conf:7:5]
- 7 │     recursion yes
-   ·                  ^ expected ';'
-   ╰────
-```
+The diagnostic code is `hornet_bind9::parse`, and the source shown is named after the
+`file` field. The highlighted span currently points at the start of the source; zone-file
+errors carry the line number in their message.
 
 ---
 

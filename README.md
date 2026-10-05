@@ -52,8 +52,10 @@ files and DNS zone files.
 | Capability | Details |
 |---|---|
 | **Parse `named.conf`** | options, zone, view, acl, logging, controls, key, primaries/masters, server |
-| **Parse zone files** | A, AAAA, NS, MX, SOA, CNAME, PTR, TXT, SRV, CAA, SSHFP, TLSA, NAPTR, DS, DNSKEY, RRSIG, NSEC, HTTPS/SVCB, and unknown types |
-| **Write / format** | Round-trip serialisation with configurable indentation and keyword normalisation |
+| **Parse zone files** | A, AAAA, NS, MX, SOA, CNAME, PTR, HINFO, TXT, SRV, CAA, SSHFP, TLSA, NAPTR, LOC, DS, DNSKEY, RRSIG, NSEC, NSEC3, NSEC3PARAM, HTTPS/SVCB, ANAME/ALIAS, and unknown types; `\DDD` / `\X` escapes decoded |
+| **Nothing dropped silently** | Malformed record data is kept verbatim and flagged by the validator; unparseable zone-file lines are errors naming the line |
+| **Write / format** | Round-trip serialisation with configurable indentation, keyword normalisation and explicit classes |
+| **Injection-safe writer** | Every modelled string is quoted or escaped for its position (RFC 1035 escaping in zone files), so values from untrusted sources cannot inject configuration ([ADR-0003](docs/adr/0003-writer-escaping-contract-and-input-hardening.md)) |
 | **Validate** | Semantic checks (undefined ACLs, duplicate zones, missing SOA/NS, CIDR correctness, …) |
 | **CLI tool** | `parse`, `zone`, `check`, `check-zone`, `fmt`, `convert` subcommands |
 | **Error reporting** | Rich diagnostics via [miette](https://github.com/zkat/miette) |
@@ -99,7 +101,7 @@ full table including write and validation timings.
 
 ```toml
 [dependencies]
-hornet-bind9 = "0.1"
+hornet-bind9 = "0.2"
 ```
 
 ### CLI
@@ -147,7 +149,7 @@ $TTL 1h
 @ IN A  93.184.216.34
 "#;
 
-let zone = parse_zone_file(zone_text)?;
+let zone = parse_zone_file(zone_text)?;   // Err names the line that failed
 for record in zone.records() {
     println!("{}: {}", record.name.as_ref().map(|n| n.as_str()).unwrap_or("(blank)"), record.rdata.rtype());
 }
@@ -186,6 +188,19 @@ let formatted = write_named_conf(&conf, &opts);
 println!("{formatted}");
 ```
 
+Modelled fields are escaped on output, so an AST built from untrusted input is safe to
+write. The raw carriers (`extra`, `Statement::Unknown`, `RData::Unknown`) are written
+verbatim and must only hold trusted text.
+
+### Parse text from a named source
+
+```rust
+use hornet_bind9::parse_named_conf_source;
+
+// Diagnostics name "configmap/bind/named.conf" instead of "<input>".
+let conf = parse_named_conf_source("configmap/bind/named.conf", &text)?;
+```
+
 ---
 
 ## CLI
@@ -221,6 +236,10 @@ hornet fmt --check /etc/bind/named.conf
 # Migrate legacy keywords
 hornet convert --in-place /etc/bind/named.conf
 
+# Rewrite a file that has comments (hornet does not preserve them;
+# without --force, fmt and convert --in-place refuse)
+hornet fmt --force /etc/bind/named.conf
+
 # Validate a zone file
 hornet check-zone /etc/bind/zones/example.com.db
 ```
@@ -236,7 +255,7 @@ hornet check-zone /etc/bind/zones/example.com.db
 - `view "name" [class] { … };` — with nested zones
 - `acl "name" { … };`
 - `logging { channel … ; category … ; };`
-- `controls { inet … ; };`
+- `controls { inet … ; unix … ; };`
 - `key "name" { algorithm; secret; };`
 - `primaries / masters "name" { … };`
 - `server addr { … };`

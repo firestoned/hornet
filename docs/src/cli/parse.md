@@ -54,6 +54,8 @@ hornet parse /etc/bind/named.conf > /tmp/named.conf.formatted
 
 - Output is written to **stdout**; errors are written to **stderr**.
 - The source file is never modified by this command.
+- Comments are not included in the output. If the file has any, a warning is
+  printed on stderr: `warning: <file> contains comments; they are not included in the output`.
 - Use [`fmt`](./fmt.md) to reformat a file in-place.
 
 ---

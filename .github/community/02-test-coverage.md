@@ -10,7 +10,7 @@
 > `Code Coverage` job is part of `PR Checks Passed`, and every box below is
 > ticked.
 
-> **Status:** 🔶 In progress (opened 2026-10-05). Design in
+> **Status:** ✅ Complete 2026-10-05 (opened the same day). Design in
 > [ADR-0002](../../docs/adr/0002-coverage-policy-and-per-suite-reports.md).
 > Reporting infrastructure landed 2026-10-05. Baseline at `9d2581a`
 > (unit + integration): 79.53% lines, 91.85% functions, 72.86% regions;
@@ -90,18 +90,16 @@ See ADR-0002 for the full context.
 - [x] Zone parser: `$TTL` overflow wrapped (or panicked in debug); now rejected
 - [x] Zone parser: `$GENERATE` with `$` in the left-hand side was dropped
 
-### Remaining
+### Remaining (all closed for 0.2.0)
 
-- [ ] Region coverage: the remaining missed regions are `?` error arms on
-      parsers that cannot fail (`ws`, `opt`, `repeat(0..)`); closing them
-      means making those helpers infallible
-- [ ] Writer: `WriteOptions::explicit_class` has no effect (class is written
-      only when the AST has one)
-- [ ] `controls { unix ... }` is skipped by the parser and ignored by the writer
-- [ ] An empty address-match list is written as `{ ; }`
-- [ ] AST fields the writer never emits: `memstatistics_file`, `rate_limit`,
-      `update_policy`, zone `forwarders`, `journal`
-- [ ] Zone parser: LOC, RRSIG, NSEC3 and NSEC3PARAM parse as unknown types
-      although the AST and writer support them
-- [ ] `dns_class` does not accept `CH` or `ANY`
-- [ ] `src/main.rs` repeats its coloured severity label strings (style rule)
+- [x] Region coverage: never-failing helpers made infallible; the CLI reads
+      each input once; 100% regions crate-wide
+- [x] Writer: `WriteOptions::explicit_class` works (zone and view class rules)
+- [x] `controls { unix ... }` parsed (octal/hex `perm`) and written
+- [x] An empty address-match list is written as `{ }`
+- [x] Every modelled AST field is written and parsed back
+- [x] Typed LOC, RRSIG, NSEC3 and NSEC3PARAM parsing
+- [x] `dns_class` accepts `CH`/`CHAOS`, `HS`/`HESIOD`, `ANY`
+- [x] `src/main.rs` severity labels are named constants
+
+Gaps found while closing these, none of which loses data, moved to roadmap 03.
