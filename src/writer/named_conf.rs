@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Serialise a [`NamedConf`] AST to text.
 
 use super::{indent, quoted, WriteOptions};
@@ -464,7 +467,7 @@ fn write_key(out: &mut String, k: &KeyStmt, depth: usize, opts: &WriteOptions) {
     indent(out, depth, opts);
     let _ = writeln!(out, "key {} {{", quoted(&k.name));
     indent(out, depth + 1, opts);
-    let _ = writeln!(out, "algorithm {};", &k.algorithm);
+    let _ = writeln!(out, "algorithm {};", k.algorithm);
     indent(out, depth + 1, opts);
     let _ = writeln!(out, "secret {};", quoted(&k.secret));
     indent(out, depth, opts);

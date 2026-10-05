@@ -4,3 +4,9 @@ Cargo.lock
 .DS_Store
 /dist/
 /docs/site/
+/sbom/
+*.cdx.json
+licenses.json
+lcov.info
+subjects.sha256
+subjects.b64

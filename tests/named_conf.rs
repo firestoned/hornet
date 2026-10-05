@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! Integration tests for the named.conf parser + writer round-trip.
 
 use hornet_bind9::ast::named_conf::*;

@@ -6,9 +6,33 @@
 > Single crate: `hornet` (library + optional CLI binary via `cli` feature flag)
 
 **CRITICAL Coding Patterns** (full details in `rules/`):
+- **ADD governs ALL work**: ADR → TDD → implement → docs → threat model: `rules/architecture-driven-development.md`
 - **TDD**: Write tests FIRST — `rules/testing.md` + `tdd-workflow` skill
 - **After ANY Rust change**: run `cargo-quality` skill (NON-NEGOTIABLE)
 - **Early returns / magic numbers / style**: `rules/rust-style.md`
+
+---
+
+## 🚨 CRITICAL: ADD (Architecture Driven Development)
+
+**ADD is the governing methodology for this repo.** Every architecturally
+significant change follows the fixed pipeline, each step complete before the
+next starts:
+
+```
+ADR  →  TDD  →  implement  →  docs  →  threat model
+```
+
+1. **ADR**: record the decision in `docs/adr/NNNN-title.md` (title `# NNNN: Title`,
+   metadata bullets, then Context / Decision / Consequences)
+2. **TDD**: tests first, then minimum implementation (`tdd-workflow` skill)
+3. **Docs**: CHANGELOG, `docs/src/`, roadmap detail doc + `ROADMAPS.md`
+4. **Threat model**: full pass over `docs/src/security/threat-model.md`; bump
+   the header stamp. An ADR is not implemented until this pass is done.
+
+There is no CALM step: hornet is a single crate with no deployable topology
+(see the rule for when that changes). Full rule, applicability criteria, and
+checklist: `rules/architecture-driven-development.md`.
 
 ---
 
@@ -26,14 +50,22 @@ ALWAYS use `rg` for code search. NEVER use `grep`, `find`, or `lsof`.
 
 ---
 
-## 🚨 Plans and Roadmaps → `docs/roadmaps/`
+## 🚨 Plans and Roadmaps → `.github/community/` + `ROADMAPS.md`
 
-ALL planning documents MUST go in `docs/roadmaps/`. Filenames: **lowercase**, **hyphens only** (no underscores, no uppercase).
+Roadmap detail docs live in `.github/community/NN-title.md`; `ROADMAPS.md` at the
+repo root is the status board. Filenames are **lowercase**, **hyphens only**, with a
+zero-padded two-digit prefix **contiguous from `00`** (inserting or retiring one
+renumbers the run and fixes every reference in the same commit). Refer to them as
+"roadmap 00". ADRs live separately in `docs/adr/NNNN-title.md` (four digits, never
+renumbered).
 
 ```
-✅ docs/roadmaps/serde-support-plan.md
-❌ ROADMAP.md  ❌ docs/roadmaps/FEATURE_PLAN.md  ❌ docs/roadmaps/Phase_3.md
+✅ .github/community/02-serde-support.md
+❌ ROADMAP.md  ❌ .github/community/FEATURE_PLAN.md  ❌ .github/community/2-phase_3.md
 ```
+
+When work completes a roadmap item, update **both** the detail doc and its
+`ROADMAPS.md` row in the same commit. See `.github/community/README.md`.
 
 ---
 
@@ -62,7 +94,7 @@ See `rules/documentation.md` for full workflow.
 - Ask "Does documentation need to be updated?" before marking ANY task complete
 - Update `.claude/CHANGELOG.md` with `**Author:**` on EVERY code change (MANDATORY — no exceptions)
 - Build docs with `make docs` — use `build-docs` skill
-- For ADRs: create `/docs/adr/NNNN-title.md` with Status / Context / Decision / Consequences
+- For ADRs: create `docs/adr/NNNN-title.md` with metadata bullets (Status / Date) then Context / Decision / Consequences (see `rules/architecture-driven-development.md`)
 
 ---
 
@@ -109,9 +141,11 @@ tests/              # Integration tests
 └── zone_file.rs
 
 docs/
-├── roadmaps/       ← ALL planning docs here (lowercase-hyphen filenames)
-├── adr/            ← Architecture Decision Records
-└── src/            ← MkDocs source
+├── adr/            ← Architecture Decision Records (NNNN-title.md)
+└── src/            ← MkDocs source (src/security/threat-model.md: ADD final step)
+
+.github/community/  ← roadmap detail docs (NN-title.md), indexed by ROADMAPS.md
+ROADMAPS.md         ← roadmap status board
 ```
 
 ---

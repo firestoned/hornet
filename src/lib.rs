@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! # hornet-bind9
 //!
 //! Parse, write, and validate BIND9 `named.conf` configuration files and DNS

@@ -4,6 +4,36 @@ Internal development log. For the public release changelog see `docs/src/referen
 
 Each entry documents what changed, who requested it, and why — required for auditability.
 
+## [2026-10-05 12:00] - ADD standards, bindy workflow layout, Apache-2.0 relicense
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `LICENSE`, `NOTICE`, `Cargo.toml`, `docs/pyproject.toml`, `README.md`, `docs/src/index.md`, `docs/src/development/contributing.md`, `docs/src/reference/changelog.md`: relicensed MIT to Apache-2.0
+- `src/**`, `tests/*.rs`, `benches/*.rs`, `docs/mkdocs.yml`, docs CSS/JS: SPDX headers now `Apache-2.0`; added the missing copyright/SPDX header to 16 source files and `Cargo.toml`
+- `.claude/rules/architecture-driven-development.md` (new): ADD rule, ADR, TDD, implement, docs, threat model (no CALM step for a single library crate)
+- `.claude/CLAUDE.md`, `.claude/rules/documentation.md`, `.claude/SKILL.md`, `.claude/skills/*/SKILL.md` (new): ADD wired in; skills split into bindy's per-directory layout; roadmap guidance points at `.github/community/` and `ROADMAPS.md`
+- `ROADMAPS.md`, `.github/community/README.md` (new); `docs/roadmaps/bind9-version-support.md` moved to `.github/community/00-bind9-version-support.md`; new roadmap 01 (CI consolidation and supply chain)
+- `docs/adr/0001-single-build-workflow-and-bind9-e2e-oracle.md` (new)
+- `docs/src/security/threat-model.md` (new, in mkdocs nav) and `SECURITY.md` (new); open findings are tracked privately until remediated
+- `.github/workflows/build.yaml` (new) replaces `pr.yml`, `main.yaml` and `release.yml`; `e2e.yaml`, `dependabot-auto-merge.yaml`, `codeql.yml`, `scorecard.yml`, `license-scan.yaml` (new); `bench.yml` renamed `bench.yaml`; every action SHA-pinned; `docs.yaml` re-pinned
+- `.github/dependabot.yml`, `.github/codeql/codeql-config.yml`, `.cargo/deny.toml` (new)
+- `tests/e2e/` (new): `run.sh`, fixtures and `known-failures.txt`; round-trips fixtures through hornet and real BIND9 9.18 / 9.20 (`named-checkconf`, `named-checkzone`)
+- `Makefile`: `e2e`, `e2e-bind`, `e2e-run`, `cargo-deny`, `license-check`, `license-report`, `version-info`, `sbom-stage`, `release-tarball`, `provenance-subjects`, `release-assets`, `build-target`, `test-release`; clippy also allows `clippy::assert_is_empty` (new pedantic lint in Rust 1.99 whose suggested rewrites are less readable)
+- `src/writer/named_conf.rs`: drop a needless borrow in `write_key` flagged by Rust 1.99 clippy (no behaviour change)
+- `docs/src/development/testing.md`, `setup.md`: e2e suite and workflow table; repo tree
+
+### Why
+Bring hornet to the same Architecture Driven Development standards and workflow layout as bindy, and relicense to Apache-2.0 to match the rest of the firestoned projects. The e2e suite uses BIND9 itself as the oracle; on its first run it caught three hornet bugs (tracked in roadmap 01 and `tests/e2e/known-failures.txt`).
+
+### Impact
+- [x] Breaking change (license change)
+- [x] New feature (e2e suite, CI)
+- [ ] Bug fix
+- [ ] Documentation only
+
+---
+
 ## [2026-03-29 00:00] - Rename crate from `hornet` to `hornet-bind9`
 
 **Author:** Erick Bourgeois

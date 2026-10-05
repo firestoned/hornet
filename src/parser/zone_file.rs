@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! winnow parser for RFC 1035 zone files.
 
 use std::net::{Ipv4Addr, Ipv6Addr};

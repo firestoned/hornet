@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! winnow parser for BIND9 `named.conf` configuration files.
 
 use std::net::IpAddr;

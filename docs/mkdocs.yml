@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Erick Bourgeois, firestoned
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # Hornet Documentation - MkDocs Material Configuration
 
@@ -194,6 +194,9 @@ nav:
       - Setup: development/setup.md
       - Testing: development/testing.md
       - Contributing: development/contributing.md
+
+  - Security:
+      - Threat Model: security/threat-model.md
 
   - Reference:
       - Overview: reference/index.md

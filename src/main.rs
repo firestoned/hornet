@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! `bind9` — CLI for parsing, validating and formatting BIND9 config files.
 //!
 //! Usage:

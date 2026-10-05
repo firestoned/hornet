@@ -16,6 +16,34 @@ and pull requests are all appreciated.
 
 ---
 
+## Architecture decisions and roadmaps
+
+hornet follows **Architecture Driven Development (ADD)**: for architecturally
+significant changes the order is fixed,
+
+```
+ADR  →  TDD  →  implement  →  docs  →  threat model
+```
+
+- **ADRs** live in [`docs/adr/`](https://github.com/firestoned/hornet/tree/main/docs/adr)
+  as `NNNN-title.md`. Write one before changing the public API or AST types, the
+  parser's permissive/strict behaviour, the writer's output or `WriteOptions`,
+  validator diagnostic semantics, the CLI contract, dependencies or feature flags,
+  or the CI and release pipeline.
+- **Roadmaps** live in
+  [`.github/community/`](https://github.com/firestoned/hornet/tree/main/.github/community),
+  with their status board in
+  [`ROADMAPS.md`](https://github.com/firestoned/hornet/blob/main/ROADMAPS.md). A PR
+  that completes a roadmap task ticks it in the detail doc and updates the
+  `ROADMAPS.md` row.
+- The **[threat model](../security/threat-model.md)** gets a full pass, and a
+  bumped stamp, once an ADR is implemented.
+
+Small bug fixes, docs changes and adding one more typed option or record type
+following the existing pattern need tests, not an ADR.
+
+---
+
 ## Adding support for a new `named.conf` statement
 
 Follow this checklist in order:
@@ -92,4 +120,4 @@ Open an issue at <https://github.com/firestoned/hornet/issues> with:
 ## License
 
 By contributing to Hornet you agree that your contributions will be licensed under
-the MIT License, consistent with the rest of the project.
+the Apache License, Version 2.0, consistent with the rest of the project.

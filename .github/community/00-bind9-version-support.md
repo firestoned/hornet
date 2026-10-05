@@ -1,6 +1,21 @@
 # BIND9 Version Support
 
-**Status:** Proposed
+> **Goal.** Callers can validate (and optionally write) a parsed config against a
+> named BIND9 release line and get a precise diagnostic for every option that is
+> removed in, or not yet available in, that release.
+>
+> **Stop condition.** Phases 1 and 2 below are shipped: a `BindVersion` type and
+> compat table, version-aware `validate_named_conf`, and `WriteOptions::target_version`,
+> each with tests and docs. Phase 3 (migration hints) is optional and may be split
+> into its own roadmap.
+
+> **Status:** ⛔ Not started. Verified against `main` @ `10fee80` on 2026-10-05:
+> no `BindVersion`, `OptionCompat`, `target_version` or migration code exists in
+> `src/`. Moved here from `docs/roadmaps/bind9-version-support.md` on 2026-10-05.
+> Phase 1 changes the public API (`validate_named_conf` gains a parameter, or a new
+> function is added), so it needs an ADR first. The body below is the proposal as
+> originally written on 2026-03-27.
+
 **Created:** 2026-03-27
 
 ---

@@ -5,7 +5,7 @@
 
 ### Project Status
 
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Crates.io](https://img.shields.io/crates/v/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
 [![Crates.io Downloads](https://img.shields.io/crates/d/hornet-bind9.svg)](https://crates.io/crates/hornet-bind9)
 [![docs.rs](https://docs.rs/hornet-bind9/badge.svg)](https://docs.rs/hornet-bind9)
@@ -142,4 +142,4 @@ Current version: **v0.1.0**
 
 ## License
 
-Hornet is licensed under the [MIT License](https://github.com/firestoned/hornet/blob/main/LICENSE).
+Hornet is licensed under the [Apache License, Version 2.0](https://github.com/firestoned/hornet/blob/main/LICENSE).

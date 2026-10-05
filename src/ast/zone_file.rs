@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: Apache-2.0
+
 //! AST types for RFC 1035 zone files and common extensions.
 //!
 //! The entry point is [`ZoneFile`], which contains a list of [`Entry`]s.

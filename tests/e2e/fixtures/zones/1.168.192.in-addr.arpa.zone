@@ -1,0 +1,12 @@
+; Copyright (c) 2025 Erick Bourgeois, firestoned
+; SPDX-License-Identifier: Apache-2.0
+;
+; Reverse zone.
+$ORIGIN 1.168.192.in-addr.arpa.
+$TTL 86400
+
+@   IN  SOA ns1.example.com. hostmaster.example.com. 2024010101 3600 900 1209600 300
+@   IN  NS  ns1.example.com.
+1   IN  PTR gateway.example.com.
+10  IN  PTR host10.example.com.
+20  IN  PTR host20.example.com.

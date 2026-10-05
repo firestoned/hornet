@@ -1,0 +1,12 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: Apache-2.0
+
+name: "hornet CodeQL configuration"
+
+# Exclude test code from security analysis: fixtures carry synthetic keys and
+# secrets (e.g. the TSIG secrets in tests/e2e/fixtures/) that are not real
+# credentials, and flagging them only produces false positives.
+paths-ignore:
+  - "src/**/*_tests.rs"
+  - "tests/**"
+  - "benches/**"
