@@ -416,7 +416,7 @@ checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hornet-bind9"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "clap",
