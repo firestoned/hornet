@@ -4,6 +4,36 @@ Internal development log. For the public release changelog see `docs/src/referen
 
 Each entry documents what changed, who requested it, and why — required for auditability.
 
+## [2026-10-05 18:00] - 100% line/function coverage, per-suite coverage reports, 12 bug fixes
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Makefile`, `scripts/coverage-summary.sh`, `scripts/coverage-e2e.sh`, `codecov.yml` (new): `coverage-unit`, `coverage-integration`, `coverage` (gated at 100% lines and functions), `coverage-e2e` (instrumented binary against real BIND9), `coverage-summary` (llvm-cov JSON to a Markdown table)
+- `.github/workflows/build.yaml`: coverage job writes unit, integration and combined tables to the job summary, uploads `coverage-unit` / `coverage-integration` / `coverage-all` HTML artifacts and Codecov flags; the 100% gate is part of `PR Checks Passed`
+- `.github/workflows/e2e.yaml`: instrumented build, profiles per BIND leg, merged `coverage-e2e` report in the job summary, artifact and Codecov flag `e2e`
+- `tests/e2e/`: fixtures `servers.conf`, `records.example.zone`, `dnssec.example.zone`; checks for `check`, `check-zone`, `fmt`, `convert --in-place`; `known-failures.txt` now empty (56/56 on BIND 9.18 and 9.20)
+- Tests: about 420 new unit and integration tests across every module; new `tests/cli.rs`, `tests/named_conf_parser.rs`, `tests/named_conf_roundtrip.rs`, `tests/zone_file_roundtrip.rs`, `src/lib_tests.rs`, `src/writer/mod_tests.rs`
+- `Cargo.toml`: dev-dependencies `assert_cmd` 2, `predicates` 3, `tempfile` 3 (actively maintained, standard for driving a CLI binary in integration tests)
+- `src/writer/named_conf.rs`: `controls` key list `;` and `read-only`; legacy `masters` for the zone option (`primaries_keyword`); `yes_no` helper
+- `src/main.rs`: `--no-modern` (overrides `--modern`, last wins); shared `severity_prefix`
+- `src/lib.rs`: parse functions share `parse_with`
+- `src/parser/named_conf.rs`, `src/parser/common.rs`: `authpriv` before `auth`; uppercase size suffixes; `take_to_semi` returns `String`
+- `src/parser/zone_file.rs`: entries parse from isolated RFC 1035 logical lines (fixes dropped records after SOA/TXT/LOC/HTTPS/NSEC/unknown/`$GENERATE`); blank-owner inheritance; parenthesised multi-line records; `;` in quoted TXT; checked `$TTL` arithmetic; `$GENERATE` LHS with `$`
+- `docs/adr/0002-coverage-policy-and-per-suite-reports.md`, `.github/community/02-test-coverage.md` (new); roadmap 01 follow-ups ticked; `ROADMAPS.md`; `docs/src/development/testing.md`; `docs/src/concepts/zone-files.md`; `docs/src/reference/changelog.md`; threat model full pass (v1.1, against ADR-0001 ... ADR-0002)
+- `.gitignore`: `.claude/worktrees/`
+
+### Why
+Reach 100% line and function coverage with meaningful tests, and show each suite's coverage in its own workflow run. Writing the tests found 12 real bugs, fixed test-first.
+
+### Impact
+- [ ] Breaking change
+- [x] New feature
+- [x] Bug fix
+- [ ] Documentation only
+
+---
+
 ## [2026-10-05 12:00] - ADD standards, bindy workflow layout, Apache-2.0 relicense
 
 **Author:** Erick Bourgeois

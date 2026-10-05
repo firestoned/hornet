@@ -6,7 +6,7 @@
 use winnow::{
     ascii::{digit1, hex_digit1, multispace1, till_line_ending},
     combinator::{alt, delimited, opt, preceded, repeat},
-    token::take_until,
+    token::{one_of, take_until},
     ModalResult, Parser,
 };
 
@@ -121,7 +121,7 @@ pub fn yes_no(input: &mut &str) -> ModalResult<bool> {
 
 use crate::ast::named_conf::SizeSpec;
 
-/// Parse a size specification: `unlimited`, `default`, or `<num>[kmg]`.
+/// Parse a size specification: `unlimited`, `default`, or `<num>[kKmMgG]`.
 ///
 /// # Errors
 /// Returns a parse error if the input does not match any valid size specification.
@@ -129,11 +129,13 @@ pub fn size_spec(input: &mut &str) -> ModalResult<SizeSpec> {
     alt((
         "unlimited".map(|_| SizeSpec::Unlimited),
         "default".map(|_| SizeSpec::Default),
-        (uint, opt(alt(("k", "m", "g")))).map(|(n, suffix)| match suffix {
-            Some("k") => SizeSpec::Kilobytes(n),
-            Some("m") => SizeSpec::Megabytes(n),
-            Some("g") => SizeSpec::Gigabytes(n),
-            _ => SizeSpec::Bytes(n),
+        (uint, opt(one_of(['k', 'K', 'm', 'M', 'g', 'G']))).map(|(n, suffix)| {
+            match suffix.map(|c| c.to_ascii_lowercase()) {
+                Some('k') => SizeSpec::Kilobytes(n),
+                Some('m') => SizeSpec::Megabytes(n),
+                Some('g') => SizeSpec::Gigabytes(n),
+                _ => SizeSpec::Bytes(n),
+            }
         }),
     ))
     .parse_next(input)

@@ -14,6 +14,10 @@
 #                             output are identical (BIND's canonical print)
 #     idempotent              `hornet parse` of hornet's output is unchanged
 #     bind-accepts-convert    named-checkconf accepts `hornet convert` output
+#     hornet-check-no-errors  `hornet check` reports no errors on the fixture
+#     fmt-matches-parse       `hornet fmt` in place writes what `parse` prints
+#     fmt-check-clean         `hornet fmt --check` passes on formatted output
+#     convert-in-place        `convert --in-place` writes what `convert` prints
 #
 #   zone fixtures (fixtures/zones/<origin>.zone)
 #     bind-accepts-original   named-checkzone accepts the fixture itself
@@ -21,6 +25,8 @@
 #     semantic-equivalent     named-compilezone's canonical dump of fixture and
 #                             of hornet's output are identical
 #     idempotent              `hornet zone` of hornet's output is unchanged
+#     hornet-check-zone-no-errors
+#                             `hornet check-zone` reports no errors on it
 #
 # Known failures live in tests/e2e/known-failures.txt, one per line, with a
 # reason. A listed case that fails is reported XFAIL; a listed case that
@@ -174,6 +180,24 @@ for src in "${WORK}"/in/named-conf/*.conf; do
     "${HORNET_BIN}" convert "${src}" >"${converted}" 2>"${WORK}/log" || true
     chmod a+r "${converted}"
     check "${name}" bind-accepts-convert bind_tool named-checkconf "out/${name}.convert"
+
+    # hornet's validator raises no errors on a config BIND9 accepts.
+    check "${name}" hornet-check-no-errors \
+        "${HORNET_BIN}" check --allow-warnings --min-severity error "${src}"
+
+    # `fmt` rewrites in place to exactly what `parse` prints, and `fmt --check`
+    # then reports the file as already formatted.
+    fmt_copy="${WORK}/out/${name}.fmt"
+    cp "${src}" "${fmt_copy}"
+    "${HORNET_BIN}" fmt "${fmt_copy}" >"${WORK}/log" 2>&1 || true
+    diff_check "${name}" fmt-matches-parse "${parsed}" "${fmt_copy}"
+    check "${name}" fmt-check-clean "${HORNET_BIN}" fmt --check "${fmt_copy}"
+
+    # `convert --in-place` writes exactly what `convert` prints.
+    conv_copy="${WORK}/out/${name}.convert-in-place"
+    cp "${src}" "${conv_copy}"
+    "${HORNET_BIN}" convert --in-place "${conv_copy}" >"${WORK}/log" 2>&1 || true
+    diff_check "${name}" convert-in-place "${converted}" "${conv_copy}"
 done
 
 # ── zone fixtures: fixtures/zones/<origin>.zone ─────────────────────────────
@@ -204,6 +228,10 @@ for src in "${WORK}"/in/zones/*.zone; do
 
     "${HORNET_BIN}" zone "${written}" >"${rewritten}" 2>&1 || true
     diff_check "${name}" idempotent "${written}" "${rewritten}"
+
+    # hornet's zone validator raises no errors on a zone BIND9 accepts.
+    check "${name}" hornet-check-zone-no-errors \
+        "${HORNET_BIN}" check-zone --allow-warnings "${src}"
 done
 
 echo

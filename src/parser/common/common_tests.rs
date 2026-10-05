@@ -4,8 +4,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::{
-        bareword, cidr, hex_string, ip_addr, quoted_string, semicolon, size_spec, string_value,
-        uint, ws, yes_no,
+        bareword, cidr, close_brace_semi, hex_string, ip_addr, quoted_string, semicolon, size_spec,
+        string_value, uint, unescape, ws, yes_no,
     };
     use crate::ast::named_conf::SizeSpec;
 
@@ -410,5 +410,105 @@ mod tests {
     fn test_semicolon_fails_without_semicolon() {
         let mut input = "rest";
         assert!(semicolon(&mut input).is_err());
+    }
+
+    // ── close_brace_semi tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_close_brace_semi_with_whitespace() {
+        let mut input = " }\n ; next";
+        assert!(close_brace_semi(&mut input).is_ok());
+        assert_eq!(input, "next");
+    }
+
+    #[test]
+    fn test_close_brace_semi_fails_without_semicolon() {
+        let mut input = "} next";
+        assert!(close_brace_semi(&mut input).is_err());
+    }
+
+    // ── escape sequences in quoted strings ────────────────────────────────────
+
+    #[test]
+    fn test_quoted_string_newline_and_tab_escapes() {
+        let mut input = r#""line1\nline2\tend""#;
+        let result = quoted_string(&mut input).unwrap();
+        assert_eq!(result, "line1\nline2\tend");
+    }
+
+    #[test]
+    fn test_quoted_string_unrecognised_escape_is_kept_verbatim() {
+        let mut input = r#""C:\dir""#;
+        let result = quoted_string(&mut input).unwrap();
+        assert_eq!(result, r"C:\dir");
+    }
+
+    #[test]
+    fn test_quoted_string_fails_without_closing_quote() {
+        let mut input = "\"unterminated";
+        assert!(quoted_string(&mut input).is_err());
+    }
+
+    #[test]
+    fn test_unescape_maps_each_escape_sequence() {
+        assert_eq!(unescape(r#"a\"b"#), "a\"b");
+        assert_eq!(unescape(r"a\\b"), r"a\b");
+        assert_eq!(unescape(r"a\nb"), "a\nb");
+        assert_eq!(unescape(r"a\tb"), "a\tb");
+        assert_eq!(unescape(r"a\qb"), r"a\qb");
+        assert_eq!(unescape("trailing\\"), "trailing\\");
+        assert_eq!(unescape("plain"), "plain");
+    }
+
+    // ── size suffix case ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_size_spec_uppercase_suffixes() {
+        for (text, expected) in [
+            ("4K", SizeSpec::Kilobytes(4)),
+            ("64M", SizeSpec::Megabytes(64)),
+            ("1G", SizeSpec::Gigabytes(1)),
+        ] {
+            let mut input = text;
+            assert_eq!(size_spec(&mut input).unwrap(), expected, "{text}");
+            assert_eq!(input, "");
+        }
+    }
+
+    #[test]
+    fn test_size_spec_fails_on_non_numeric() {
+        let mut input = "lots";
+        assert!(size_spec(&mut input).is_err());
+    }
+
+    // ── IP / CIDR failure paths ───────────────────────────────────────────────
+
+    #[test]
+    fn test_ip_addr_fails_on_hostname() {
+        let mut input = "ns1.example.com";
+        assert!(ip_addr(&mut input).is_err());
+    }
+
+    #[test]
+    fn test_ip_addr_ipv6_full() {
+        let mut input = "2001:db8::53;";
+        let addr = ip_addr(&mut input).unwrap();
+        assert_eq!(addr, "2001:db8::53".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(input, ";");
+    }
+
+    #[test]
+    fn test_cidr_ipv6_with_prefix() {
+        let mut input = "2001:db8::/48";
+        let (addr, prefix) = cidr(&mut input).unwrap();
+        assert_eq!(addr, "2001:db8::".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(prefix, Some(48));
+    }
+
+    #[test]
+    fn test_ws_unterminated_block_comment_is_left_in_place() {
+        let mut input = "/* never closed";
+        ws(&mut input).unwrap();
+        assert_eq!(input, "/* never closed");
     }
 }

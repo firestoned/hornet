@@ -36,7 +36,10 @@ clap      = { version = "=4.4.18", features = ["derive", "color"], optional = tr
 serde     = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion  = { version = "0.5", features = ["html_reports"] }
+assert_cmd = "2"
+predicates = "3"
+tempfile   = "3"
 
 [[bench]]
 name    = "named_conf"

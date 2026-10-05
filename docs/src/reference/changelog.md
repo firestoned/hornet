@@ -10,6 +10,23 @@ All notable changes to Hornet are documented here.
 
 - **License changed from MIT to Apache-2.0.** The `LICENSE` file, SPDX headers,
   `Cargo.toml` and docs now say Apache-2.0, and a `NOTICE` file is included.
+- CLI: `parse` and `fmt` accept `--no-modern` to emit legacy keywords
+  (`master`, `slave`, `masters`); `--modern` remains the default and the last
+  flag given wins. Previously `--modern` could not be turned off.
+- Zone parser: `$TTL` values that overflow 32 bits are rejected instead of
+  wrapping. `$TTL` also accepts compound values such as `1h30m`.
+
+### Fixed
+
+- Writer: `controls` key lists now end with `;` (BIND rejected the output),
+  and `read-only` is written.
+- Writer: with legacy keywords, a zone's `primaries` option is written as `masters`.
+- named.conf parser: `syslog authpriv;` and uppercase size suffixes (`256M`) parse.
+- Zone parser: the record following a single-line SOA, TXT, LOC, HTTPS, NSEC,
+  unknown-type or `$GENERATE` line is no longer silently dropped.
+- Zone parser: blank-owner lines inherit the previous owner; any record may
+  span lines in parentheses; `;` inside a quoted TXT string is data; `$GENERATE`
+  with `$` in the left-hand side is parsed.
 
 ---
 

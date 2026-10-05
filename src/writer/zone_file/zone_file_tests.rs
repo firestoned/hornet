@@ -593,4 +593,196 @@ mod tests {
         let out = write_zone_file(&zone, &default_opts());
         assert!(out.is_empty());
     }
+
+    // ── Exact rdata output for every type ───────────────────────────────────────
+
+    use crate::ast::zone_file::{
+        LatDir, LocData, LonDir, NaptrData, Nsec3Data, Nsec3paramData, RrsigData,
+    };
+
+    /// The rdata column of a single written record: everything after the type.
+    fn rdata_text(rdata: RData) -> String {
+        let rtype = rdata.rtype().to_owned();
+        let zone = ZoneFile {
+            entries: vec![make_record("@", rdata)],
+        };
+        let out = write_zone_file(&zone, &default_opts());
+        let (_, after) = out
+            .split_once(&format!("  {rtype:<8}  "))
+            .expect("type column not found");
+        after.trim_end_matches('\n').to_owned()
+    }
+
+    #[test]
+    fn test_write_name_rdata_types_exact() {
+        let target = || Name::new("host.example.com.");
+        for rdata in [
+            RData::Ns(target()),
+            RData::Cname(target()),
+            RData::Ptr(target()),
+            RData::Aname(target()),
+        ] {
+            assert_eq!(rdata_text(rdata), "host.example.com.");
+        }
+    }
+
+    #[test]
+    fn test_write_hinfo_exact() {
+        let text = rdata_text(RData::Hinfo {
+            cpu: "INTEL".into(),
+            os: "LINUX".into(),
+        });
+        assert_eq!(text, "\"INTEL\" \"LINUX\"");
+    }
+
+    #[test]
+    fn test_write_naptr_exact() {
+        let text = rdata_text(RData::Naptr(NaptrData {
+            order: 100,
+            preference: 10,
+            flags: "U".into(),
+            service: "E2U+sip".into(),
+            regexp: "!^.*$!sip:info@example.com!".into(),
+            replacement: Name::new("."),
+        }));
+        assert_eq!(
+            text,
+            "100 10 \"U\" \"E2U+sip\" \"!^.*$!sip:info@example.com!\" ."
+        );
+    }
+
+    #[test]
+    fn test_write_rrsig_exact() {
+        let text = rdata_text(RData::Rrsig(RrsigData {
+            type_covered: "A".into(),
+            algorithm: 13,
+            labels: 2,
+            original_ttl: 3600,
+            sig_expiration: "20261101000000".into(),
+            sig_inception: "20261001000000".into(),
+            key_tag: 12345,
+            signer_name: Name::new("example.com."),
+            signature: "c2lnbmF0dXJl".into(),
+        }));
+        assert_eq!(
+            text,
+            "A 13 2 3600 20261101000000 20261001000000 12345 example.com. c2lnbmF0dXJl"
+        );
+    }
+
+    #[test]
+    fn test_write_nsec3_exact() {
+        let text = rdata_text(RData::Nsec3(Nsec3Data {
+            hash_algorithm: 1,
+            flags: 0,
+            iterations: 10,
+            salt: "AABBCCDD".into(),
+            next_hashed: "2T7B4G4VSA5SMI47K61MV5BV1A22BOJR".into(),
+            type_bitmap: vec!["A".into(), "RRSIG".into()],
+        }));
+        assert_eq!(
+            text,
+            "1 0 10 AABBCCDD 2T7B4G4VSA5SMI47K61MV5BV1A22BOJR A RRSIG"
+        );
+    }
+
+    #[test]
+    fn test_write_nsec3param_exact() {
+        let text = rdata_text(RData::Nsec3param(Nsec3paramData {
+            hash_algorithm: 1,
+            flags: 0,
+            iterations: 0,
+            salt: "-".into(),
+        }));
+        assert_eq!(text, "1 0 0 -");
+    }
+
+    fn loc(lat_dir: LatDir, lon_dir: LonDir) -> RData {
+        RData::Loc(LocData {
+            d_lat: 52,
+            m_lat: 22,
+            s_lat: 23.0,
+            lat_dir,
+            d_lon: 4,
+            m_lon: 53,
+            s_lon: 32.5,
+            lon_dir,
+            altitude: -2.0,
+            size: 1.0,
+            horiz_pre: 10_000.0,
+            vert_pre: 10.0,
+        })
+    }
+
+    #[test]
+    fn test_write_loc_north_east() {
+        assert_eq!(
+            rdata_text(loc(LatDir::N, LonDir::E)),
+            "52 22 23.000 N 4 53 32.500 E -2.00m 1.00m 10000.00m 10.00m"
+        );
+    }
+
+    #[test]
+    fn test_write_loc_south_west() {
+        assert_eq!(
+            rdata_text(loc(LatDir::S, LonDir::W)),
+            "52 22 23.000 S 4 53 32.500 W -2.00m 1.00m 10000.00m 10.00m"
+        );
+    }
+
+    #[test]
+    fn test_write_svcb_mixed_params_exact() {
+        let text = rdata_text(RData::Svcb(SvcbData {
+            priority: 1,
+            target: Name::new("svc.example.com."),
+            params: vec![
+                SvcParam {
+                    key: "no-default-alpn".into(),
+                    value: None,
+                },
+                SvcParam {
+                    key: "port".into(),
+                    value: Some("8443".into()),
+                },
+            ],
+        }));
+        assert_eq!(text, "1 svc.example.com. no-default-alpn port=8443");
+    }
+
+    #[test]
+    fn test_write_generate_with_ttl_and_class() {
+        let zone = ZoneFile {
+            entries: vec![Entry::Generate(GenerateDirective {
+                range_start: 1,
+                range_end: 4,
+                range_step: None,
+                lhs: "host-$".into(),
+                ttl: Some(3600),
+                class: Some(RecordClass::In),
+                rtype: "A".into(),
+                rhs: "192.0.2.$".into(),
+            })],
+        };
+        assert_eq!(
+            write_zone_file(&zone, &default_opts()),
+            "$GENERATE 1-4 host-$ 1h IN A 192.0.2.$\n"
+        );
+    }
+
+    #[test]
+    fn test_write_record_columns_exact() {
+        let zone = ZoneFile {
+            entries: vec![Entry::Record(ResourceRecord {
+                name: Some(Name::new("www")),
+                ttl: Some(300),
+                class: Some(RecordClass::In),
+                rdata: RData::A("192.0.2.1".parse().unwrap()),
+            })],
+        };
+        assert_eq!(
+            write_zone_file(&zone, &default_opts()),
+            // name | 2 + TTL right-aligned in 7 | 2 + class in 6 | 2 + type in 8 + 2 | rdata
+            "www       5m  IN      A         192.0.2.1\n"
+        );
+    }
 }

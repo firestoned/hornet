@@ -446,11 +446,7 @@ mod tests {
     // ── Implicit name (leading whitespace) ──────────────────────────────────────
 
     #[test]
-    fn test_parse_record_with_inherited_name() {
-        // zws in zone_file_inner strips leading whitespace before record_entry runs,
-        // so the second record's leading spaces are consumed and name=Some("A")
-        // (the type token gets parsed as the name). Test just verifies we get at
-        // least one record from the leading-whitespace line without panicking.
+    fn test_parse_record_with_explicit_at_owner() {
         let zf = parse("@ A 1.2.3.4\n");
         let records: Vec<_> = zf.records().collect();
         assert_eq!(records.len(), 1);
@@ -490,5 +486,536 @@ mod tests {
     fn test_parse_empty_zone_file() {
         let zf = parse("");
         assert!(zf.entries.is_empty());
+    }
+
+    // ── Line handling: no record may swallow the line after it ──────────────────
+
+    fn rtypes(zf: &ZoneFile) -> Vec<String> {
+        zf.records().map(|r| r.rdata.rtype().to_owned()).collect()
+    }
+
+    #[test]
+    fn test_record_after_single_line_soa_is_kept() {
+        let zf = parse("@ IN SOA ns1 hostmaster 1 2 3 4 5\n@ IN NS ns1\n");
+        assert_eq!(rtypes(&zf), vec!["SOA", "NS"]);
+    }
+
+    #[test]
+    fn test_record_after_txt_is_kept() {
+        let zf = parse("@ IN TXT \"hello\"\nwww IN A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["TXT", "A"]);
+    }
+
+    #[test]
+    fn test_record_after_unknown_type_is_kept() {
+        let zf = parse("@ IN TYPE65534 \\# 0\nwww IN A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["TYPE65534", "A"]);
+    }
+
+    #[test]
+    fn test_record_after_loc_is_kept() {
+        let zf = parse(
+            "@ IN LOC 52 22 23.000 N 4 53 32.000 E -2.00m 1m 10000m 10m\nwww IN A 192.0.2.1\n",
+        );
+        assert_eq!(rtypes(&zf), vec!["LOC", "A"]);
+        assert_eq!(
+            zf.records().next().unwrap().rdata,
+            RData::Unknown {
+                rtype: "LOC".into(),
+                data: "52 22 23.000 N 4 53 32.000 E -2.00m 1m 10000m 10m".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_record_after_https_is_kept() {
+        let zf = parse("@ IN HTTPS 1 . alpn=h2 port=443\nwww IN A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["HTTPS", "A"]);
+        let RData::Https(s) = &zf.records().next().unwrap().rdata else {
+            panic!("expected HTTPS");
+        };
+        assert_eq!(s.params.len(), 2);
+    }
+
+    #[test]
+    fn test_record_after_https_without_params_is_kept() {
+        let zf = parse("@ IN HTTPS 1 .\nwww IN A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["HTTPS", "A"]);
+    }
+
+    #[test]
+    fn test_record_after_nsec_is_kept() {
+        let zf = parse("@ IN NSEC host.example.com. A NS SOA\nwww IN A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["NSEC", "A"]);
+        let RData::Nsec(n) = &zf.records().next().unwrap().rdata else {
+            panic!("expected NSEC");
+        };
+        assert_eq!(n.type_bitmap, vec!["A", "NS", "SOA"]);
+    }
+
+    #[test]
+    fn test_record_after_generate_is_kept() {
+        let zf = parse("$GENERATE 1-3 host$ A 192.0.2.$\nwww IN A 192.0.2.1\n");
+        assert!(matches!(zf.entries[0], Entry::Generate(_)));
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    #[test]
+    fn test_generate_lhs_with_substitution_markers() {
+        let zf = parse("$GENERATE 1-3 host-${0,3,d} 300 IN A 192.0.2.$\n");
+        let Entry::Generate(g) = &zf.entries[0] else {
+            panic!("expected $GENERATE, got {:?}", zf.entries);
+        };
+        assert_eq!(g.lhs, "host-${0,3,d}");
+        assert_eq!(g.ttl, Some(300));
+        assert_eq!(g.class, Some(RecordClass::In));
+        assert_eq!(g.rtype, "A");
+        assert_eq!(g.rhs, "192.0.2.$");
+    }
+
+    // ── RFC 1035 logical lines ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_blank_owner_inherits_previous_owner() {
+        let zf = parse("www IN A 192.0.2.1\n    IN AAAA 2001:db8::1\n\t300 IN TXT \"x\"\n");
+        let recs: Vec<_> = zf.records().collect();
+        assert_eq!(recs.len(), 3);
+        assert_eq!(recs[0].name, Some(Name::new("www")));
+        assert_eq!(recs[1].name, None);
+        assert_eq!(recs[1].rdata, RData::Aaaa("2001:db8::1".parse().unwrap()));
+        assert_eq!(recs[2].name, None);
+        assert_eq!(recs[2].ttl, Some(300));
+        assert_eq!(recs[2].rdata, RData::Txt(vec!["x".into()]));
+    }
+
+    #[test]
+    fn test_parenthesised_dnskey_spans_lines() {
+        let zf = parse(
+            "@ IN DNSKEY 257 3 13 (\n    mdsswUyr3DPW132mOi8V9xESWE8jTo0d\n    xCjjnopKl+GqJxpVXckHAeF+KkxLbxIL ) ; KSK\nwww IN A 192.0.2.1\n",
+        );
+        let recs: Vec<_> = zf.records().collect();
+        assert_eq!(recs.len(), 2);
+        let RData::Dnskey(k) = &recs[0].rdata else {
+            panic!("expected DNSKEY, got {:?}", recs[0].rdata);
+        };
+        assert_eq!((k.flags, k.protocol, k.algorithm), (257, 3, 13));
+        assert_eq!(
+            k.public_key,
+            "mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxIL"
+        );
+        assert_eq!(recs[1].rdata, RData::A("192.0.2.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_parenthesised_txt_spans_lines() {
+        let zf = parse("@ IN TXT ( \"part one\"\n          \"part two\" )\n");
+        let r = zf.records().next().unwrap();
+        assert_eq!(
+            r.rdata,
+            RData::Txt(vec!["part one".into(), "part two".into()])
+        );
+    }
+
+    #[test]
+    fn test_semicolon_inside_quoted_txt_is_not_a_comment() {
+        let r = first_record("sel._domainkey IN TXT \"v=DKIM1; k=rsa; p=MIGf\" ; trailing\n");
+        assert_eq!(r.rdata, RData::Txt(vec!["v=DKIM1; k=rsa; p=MIGf".into()]));
+    }
+
+    #[test]
+    fn test_parenthesis_inside_quoted_txt_is_data() {
+        let zf = parse("@ IN TXT \"a (b\"\nwww IN A 192.0.2.1\n");
+        let recs: Vec<_> = zf.records().collect();
+        assert_eq!(recs[0].rdata, RData::Txt(vec!["a (b".into()]));
+        assert_eq!(recs.len(), 2);
+    }
+
+    #[test]
+    fn test_ttl_overflow_is_rejected_not_wrapped() {
+        // Multiplication overflow, then addition overflow.
+        let zf = parse("$TTL 4294967295w\n$TTL 4294967295s1s\n");
+        assert!(
+            zf.entries.iter().all(|e| !matches!(e, Entry::Ttl(_))),
+            "{:?}",
+            zf.entries
+        );
+    }
+
+    #[test]
+    fn test_ttl_max_value_is_accepted() {
+        let zf = parse("$TTL 4294967295\n");
+        assert_eq!(zf.entries, vec![Entry::Ttl(u32::MAX)]);
+    }
+
+    // ── TTL units ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_ttl_compound_units() {
+        let zf = parse("$TTL 1h30m\n$TTL 1w2d\n$TTL 10S\n");
+        assert_eq!(
+            zf.entries,
+            vec![Entry::Ttl(5_400), Entry::Ttl(777_600), Entry::Ttl(10)]
+        );
+    }
+
+    #[test]
+    fn test_soa_values_accept_compound_units() {
+        let r = first_record("@ SOA ns1 h 1 1h30m 15m 4w 1d\n");
+        let RData::Soa(soa) = r.rdata else {
+            panic!("expected SOA");
+        };
+        assert_eq!(
+            (soa.serial, soa.refresh, soa.retry, soa.expire, soa.minimum),
+            (1, 5_400, 900, 2_419_200, 86_400)
+        );
+    }
+
+    #[test]
+    fn test_invalid_ttl_directive_is_skipped() {
+        let zf = parse("$TTL soon\nwww A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["A"]);
+        assert_eq!(zf.entries.len(), 1);
+    }
+
+    // ── Directives ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_unknown_directive_becomes_blank() {
+        let zf = parse("$DATE 20261005\nwww A 192.0.2.1\n");
+        assert_eq!(zf.entries[0], Entry::Blank);
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    #[test]
+    fn test_directive_name_is_case_insensitive() {
+        let zf = parse("$origin example.com.\n$ttl 60\n");
+        assert_eq!(
+            zf.entries,
+            vec![Entry::Origin(Name::new("example.com.")), Entry::Ttl(60)]
+        );
+    }
+
+    #[test]
+    fn test_directive_with_trailing_comment() {
+        let zf = parse("$ORIGIN example.com. ; the apex\n");
+        assert_eq!(zf.entries, vec![Entry::Origin(Name::new("example.com."))]);
+    }
+
+    // ── Classes and TTL ordering ────────────────────────────────────────────────
+
+    #[test]
+    fn test_record_classes() {
+        let zf = parse(
+            "a IN A 192.0.2.1\nb in A 192.0.2.2\nc HS TXT x\nd CHAOS TXT y\ne chaos TXT z\nf ANY TXT w\ng hs TXT v\n",
+        );
+        let classes: Vec<_> = zf.records().map(|r| r.class.clone()).collect();
+        assert_eq!(
+            classes,
+            vec![
+                Some(RecordClass::In),
+                Some(RecordClass::In),
+                Some(RecordClass::Hs),
+                Some(RecordClass::Chaos),
+                Some(RecordClass::Chaos),
+                Some(RecordClass::Any),
+                Some(RecordClass::Hs),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_record_without_ttl_or_class() {
+        let r = first_record("www A 192.0.2.1\n");
+        assert_eq!((r.ttl, r.class), (None, None));
+    }
+
+    #[test]
+    fn test_record_with_ttl_only() {
+        let r = first_record("www 1h A 192.0.2.1\n");
+        assert_eq!((r.ttl, r.class), (Some(3_600), None));
+    }
+
+    // ── Names ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_absolute_relative_and_wildcard_owners() {
+        let zf = parse("www.example.com. A 192.0.2.1\nwww A 192.0.2.2\n*.dev A 192.0.2.3\n");
+        let names: Vec<_> = zf.records().map(|r| r.name.clone().unwrap()).collect();
+        assert!(names[0].is_absolute());
+        assert!(!names[1].is_absolute());
+        assert_eq!(names[2].as_str(), "*.dev");
+    }
+
+    // ── Line structure ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_crlf_line_endings() {
+        let zf = parse("$TTL 60\r\nwww A 192.0.2.1\r\n@ TXT \"hi\"\r\n");
+        assert_eq!(zf.entries[0], Entry::Ttl(60));
+        assert_eq!(rtypes(&zf), vec!["A", "TXT"]);
+        assert_eq!(
+            zf.records().nth(1).unwrap().rdata,
+            RData::Txt(vec!["hi".into()])
+        );
+    }
+
+    #[test]
+    fn test_comment_only_and_blank_lines_are_skipped() {
+        let zf = parse("; header\n\n   \n\t; indented comment\nwww A 192.0.2.1\n\n");
+        assert_eq!(zf.entries.len(), 1);
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    #[test]
+    fn test_input_without_trailing_newline() {
+        let zf = parse("www A 192.0.2.1");
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    #[test]
+    fn test_unclosed_parenthesis_runs_to_end_of_input() {
+        let zf = parse("@ SOA ns1 h ( 1 2 3\n 4 5\n");
+        let RData::Soa(soa) = &zf.records().next().unwrap().rdata else {
+            panic!("expected SOA");
+        };
+        assert_eq!(soa.minimum, 5);
+    }
+
+    #[test]
+    fn test_stray_closing_parenthesis_is_ignored() {
+        let zf = parse("www A 192.0.2.1 )\nmail A 192.0.2.2\n");
+        assert_eq!(rtypes(&zf), vec!["A", "A"]);
+    }
+
+    #[test]
+    fn test_comment_inside_parenthesised_group() {
+        let zf = parse("@ SOA ns1 h ( 1 ; serial\n 2 ; refresh\n 3 4 5 ) ; end\nwww A 192.0.2.1\n");
+        let RData::Soa(soa) = &zf.records().next().unwrap().rdata else {
+            panic!("expected SOA");
+        };
+        assert_eq!((soa.serial, soa.refresh, soa.minimum), (1, 2, 5));
+        assert_eq!(rtypes(&zf), vec!["SOA", "A"]);
+    }
+
+    // ── TXT forms ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_txt_bare_words() {
+        let r = first_record("@ TXT hello world\n");
+        assert_eq!(r.rdata, RData::Txt(vec!["hello".into(), "world".into()]));
+    }
+
+    #[test]
+    fn test_txt_mixed_quoted_and_bare() {
+        let r = first_record("@ TXT \"one two\" three\n");
+        assert_eq!(r.rdata, RData::Txt(vec!["one two".into(), "three".into()]));
+    }
+
+    #[test]
+    fn test_txt_adjacent_quoted_strings() {
+        let r = first_record("@ TXT \"a\"\"b\"\n");
+        assert_eq!(r.rdata, RData::Txt(vec!["a".into(), "b".into()]));
+    }
+
+    #[test]
+    fn test_txt_empty_quoted_string() {
+        let r = first_record("@ TXT \"\"\n");
+        assert_eq!(r.rdata, RData::Txt(vec![String::new()]));
+    }
+
+    #[test]
+    fn test_txt_unterminated_quote_keeps_content() {
+        let r = first_record("@ TXT \"open ended\n");
+        assert_eq!(r.rdata, RData::Txt(vec!["open ended".into()]));
+    }
+
+    #[test]
+    fn test_txt_without_data_is_skipped() {
+        let zf = parse("@ TXT\nwww A 192.0.2.1\n");
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    // ── Malformed records are skipped, never swallow the next line ──────────────
+
+    #[test]
+    fn test_malformed_records_are_skipped() {
+        let zf = parse(
+            "a A 999.1.1.1\n\
+             b AAAA nothex\n\
+             c MX high mail\n\
+             d SRV 1 2 x t\n\
+             e SOA ns1 h 1 2 3\n\
+             f CAA x issue \"ca\"\n\
+             g SSHFP 1 x ab\n\
+             h TLSA 3 1 x ab\n\
+             i NAPTR x 1 \"U\" \"s\" \"r\" .\n\
+             j DS x 8 2 ab\n\
+             k DNSKEY 257 3 8\n\
+             l HTTPS x svc.\n\
+             m HINFO\n\
+             n NS\n\
+             !bad A 192.0.2.1\n\
+             ok A 192.0.2.9\n",
+        );
+        assert_eq!(rtypes(&zf), vec!["A"]);
+        assert_eq!(zf.records().next().unwrap().name, Some(Name::new("ok")));
+    }
+
+    #[test]
+    fn test_malformed_directives_are_skipped() {
+        let zf = parse("$ORIGIN !\n$INCLUDE\n$GENERATE x-y a A b\n$GENERATE 1-2\nok A 192.0.2.9\n");
+        assert_eq!(zf.entries.len(), 1);
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    /// Every field of every typed RDATA parser rejects a bad value at its own
+    /// position, and the record is skipped without disturbing the next line.
+    #[test]
+    fn test_each_rdata_field_rejects_bad_value() {
+        let bad_records = [
+            "MX 10 !",
+            "SOA ! h 1 2 3 4 5",
+            "SOA ns1 ! 1 2 3 4 5",
+            "HINFO cpu",
+            "SRV 1 x 3 t",
+            "SRV 1 2 x t",
+            "SRV 1 2 3 !",
+            "CAA 0 ! \"ca\"",
+            "CAA 0 issue",
+            "SSHFP 1 x ab",
+            "SSHFP 1 2 !",
+            "TLSA 3 x 1 ab",
+            "TLSA 3 1 x ab",
+            "TLSA 3 1 1 !",
+            "NAPTR 1 x \"U\" \"s\" \"r\" .",
+            "NAPTR 1 1",
+            "NAPTR 1 1 \"U\"",
+            "NAPTR 1 1 \"U\" \"s\"",
+            "NAPTR 1 1 \"U\" \"s\" \"r\" !",
+            "DS 1 x 2 ab",
+            "DS 1 8 x ab",
+            "DS 1 8 2 !",
+            "DNSKEY x 3 8 key",
+            "DNSKEY 257 x 8 key",
+            "DNSKEY 257 3 x key",
+            "NSEC !",
+            "SVCB x svc.",
+            "SVCB 1 !",
+            "PTR !",
+            "CNAME !",
+            "ANAME !",
+        ];
+        for bad in bad_records {
+            let zf = parse(&format!("bad {bad}\nok A 192.0.2.9\n"));
+            let names: Vec<_> = zf.records().map(|r| r.name.clone()).collect();
+            assert_eq!(names, vec![Some(Name::new("ok"))], "input: {bad}");
+        }
+    }
+
+    #[test]
+    fn test_each_generate_field_rejects_bad_value() {
+        let bad_directives = [
+            "$GENERATE x-2 h A 192.0.2.$",
+            "$GENERATE 1 h A 192.0.2.$",
+            "$GENERATE 1-x h A 192.0.2.$",
+            "$GENERATE 1-2 h",
+            "$ 1",
+        ];
+        for bad in bad_directives {
+            let zf = parse(&format!("{bad}\nok A 192.0.2.9\n"));
+            assert_eq!(zf.entries.len(), 1, "input: {bad}: {:?}", zf.entries);
+            assert_eq!(rtypes(&zf), vec!["A"], "input: {bad}");
+        }
+    }
+
+    #[test]
+    fn test_generate_step_without_number_is_rejected() {
+        let zf = parse("$GENERATE 1-2/x h A 192.0.2.$\n");
+        assert!(zf.entries.is_empty(), "{:?}", zf.entries);
+    }
+
+    #[test]
+    fn test_out_of_range_numbers_are_rejected() {
+        let zf = parse("a MX 70000 mail\nb CAA 256 issue \"ca\"\nok A 192.0.2.9\n");
+        assert_eq!(rtypes(&zf), vec!["A"]);
+    }
+
+    // ── Remaining types: value-level assertions ─────────────────────────────────
+
+    #[test]
+    fn test_hinfo_bare_words() {
+        let r = first_record("host HINFO PC-Intel Linux\n");
+        assert_eq!(
+            r.rdata,
+            RData::Hinfo {
+                cpu: "PC-Intel".into(),
+                os: "Linux".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_nsec_without_type_bitmap() {
+        let r = first_record("@ NSEC next.example.com.\n");
+        assert_eq!(
+            r.rdata,
+            RData::Nsec(NsecData {
+                next_domain: Name::new("next.example.com."),
+                type_bitmap: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn test_svcb_param_without_value() {
+        let r = first_record("_svc SVCB 1 svc.example.com. no-default-alpn port=53\n");
+        let RData::Svcb(s) = r.rdata else {
+            panic!("expected SVCB");
+        };
+        assert_eq!(
+            s.params,
+            vec![
+                SvcParam {
+                    key: "no-default-alpn".into(),
+                    value: None
+                },
+                SvcParam {
+                    key: "port".into(),
+                    value: Some("53".into())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lowercase_type_is_recognised() {
+        let r = first_record("www in a 192.0.2.1\n");
+        assert_eq!(r.rdata, RData::A("192.0.2.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_unknown_type_keeps_data_without_comment() {
+        let r = first_record("@ TYPE65534 \\# 2 abcd ; private\n");
+        assert_eq!(
+            r.rdata,
+            RData::Unknown {
+                rtype: "TYPE65534".into(),
+                data: "\\# 2 abcd".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_generate_with_comment_and_no_ttl_or_class() {
+        let zf = parse("$GENERATE 10-20/5 dyn-$ CNAME pool-$ ; pool\n");
+        let Entry::Generate(g) = &zf.entries[0] else {
+            panic!("expected $GENERATE");
+        };
+        assert_eq!(
+            (g.range_start, g.range_end, g.range_step),
+            (10, 20, Some(5))
+        );
+        assert_eq!((g.ttl, g.class.clone()), (None, None));
+        assert_eq!((g.rtype.as_str(), g.rhs.as_str()), ("CNAME", "pool-$"));
     }
 }

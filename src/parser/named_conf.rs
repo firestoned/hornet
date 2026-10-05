@@ -187,7 +187,7 @@ fn parse_option_kv(input: &mut &str, block: &mut OptionsBlock) -> ModalResult<()
         }
         _ => {
             // Unknown option: consume to semicolon and stash raw
-            let raw = take_to_semi(input)?;
+            let raw = take_to_semi(input);
             block.extra.push((key, raw));
         }
     }
@@ -372,7 +372,7 @@ fn parse_zone_kv(input: &mut &str, opts: &mut ZoneOptions) -> ModalResult<()> {
             semicolon(input)?;
         }
         _ => {
-            let raw = take_to_semi(input)?;
+            let raw = take_to_semi(input);
             opts.extra.push((key, raw));
         }
     }
@@ -457,7 +457,7 @@ fn parse_view_kv(input: &mut &str, opts: &mut ViewOptions) -> ModalResult<()> {
             opts.zones.push(zone);
         }
         _ => {
-            let raw = take_to_semi(input)?;
+            let raw = take_to_semi(input);
             opts.extra.push((key, raw));
         }
     }
@@ -513,7 +513,7 @@ fn logging_stmt(input: &mut &str) -> ModalResult<LoggingBlock> {
                 block.categories.push(cat);
             }
             _ => {
-                let _ = take_to_semi(input)?;
+                let _ = take_to_semi(input);
             }
         }
         ws(input)?;
@@ -597,7 +597,7 @@ fn log_channel(input: &mut &str) -> ModalResult<LogChannel> {
                 semicolon(input)?;
             }
             _ => {
-                let _ = take_to_semi(input)?;
+                let _ = take_to_semi(input);
             }
         }
         ws(input)?;
@@ -651,13 +651,14 @@ fn syslog_facility(input: &mut &str) -> ModalResult<SyslogFacility> {
         "user".map(|_| SyslogFacility::User),
         "mail".map(|_| SyslogFacility::Mail),
         "daemon".map(|_| SyslogFacility::Daemon),
+        // `authpriv` must be tried before its prefix `auth`.
+        "authpriv".map(|_| SyslogFacility::AuthPriv),
         "auth".map(|_| SyslogFacility::Auth),
         "syslog".map(|_| SyslogFacility::Syslog),
         "lpr".map(|_| SyslogFacility::Lpr),
         "news".map(|_| SyslogFacility::News),
         "uucp".map(|_| SyslogFacility::Uucp),
         "cron".map(|_| SyslogFacility::Cron),
-        "authpriv".map(|_| SyslogFacility::AuthPriv),
         "ftp".map(|_| SyslogFacility::Ftp),
         local_facility,
     ))
@@ -739,7 +740,7 @@ fn controls_stmt(input: &mut &str) -> ModalResult<ControlsBlock> {
                 });
             }
             _ => {
-                let _ = take_to_semi(input)?;
+                let _ = take_to_semi(input);
             }
         }
         ws(input)?;
@@ -862,7 +863,7 @@ fn server_stmt(input: &mut &str) -> ModalResult<ServerStmt> {
                 semicolon(input)?;
             }
             _ => {
-                let raw = take_to_semi(input)?;
+                let raw = take_to_semi(input);
                 options.extra.push((key, raw));
             }
         }
@@ -947,8 +948,10 @@ fn unknown_stmt(input: &mut &str) -> ModalResult<Statement> {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /// Consume characters up to and including the next `;`, returning the text before it.
-#[allow(clippy::unnecessary_wraps)]
-fn take_to_semi(input: &mut &str) -> ModalResult<String> {
+///
+/// Infallible: if no terminating `;` is found the input is left unchanged and the
+/// remaining text is returned.
+fn take_to_semi(input: &mut &str) -> String {
     let mut out = String::new();
     let mut depth = 0usize;
     let mut consumed = 0;
@@ -974,7 +977,7 @@ fn take_to_semi(input: &mut &str) -> ModalResult<String> {
     if found {
         *input = &input[consumed..];
     }
-    Ok(out.trim().to_owned())
+    out.trim().to_owned()
 }
 
 #[cfg(test)]

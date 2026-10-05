@@ -158,14 +158,49 @@ Real hornet bugs that BIND9 catches are listed in `tests/e2e/known-failures.txt`
 with a reason, rather than hidden by weakening a check. A listed case that
 starts passing fails the run, so delete its line when you fix the bug.
 
+Besides the round trip, the suite runs the rest of the CLI on every fixture:
+`check` and `check-zone` must report no errors on input BIND9 accepts, `fmt`
+in place must write exactly what `parse` prints (and `fmt --check` must then
+pass), and `convert --in-place` must write exactly what `convert` prints.
+
+## Coverage
+
+Coverage policy is [ADR-0002](https://github.com/firestoned/hornet/blob/main/docs/adr/0002-coverage-policy-and-per-suite-reports.md):
+unit and integration tests together must cover **100% of lines and functions**
+of `src/` (test files excluded). Regions are reported but not gated, and e2e
+coverage is reported but not gated. Coverage uses
+[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
+(`cargo install cargo-llvm-cov`, `rustup component add llvm-tools-preview`).
+
+```bash
+make coverage-unit          # unit tests only        -> target/coverage/unit/
+make coverage-integration   # tests/*.rs only        -> target/coverage/integration/
+make coverage               # both, gated at 100%    -> target/coverage/all/
+make coverage-e2e           # instrumented CLI vs BIND9 (needs docker/podman) -> target/coverage/e2e/
+
+# Markdown table with missed-line ranges, as CI writes to the job summary
+make coverage-summary COVERAGE_JSON=target/coverage/unit/coverage.json COVERAGE_TITLE=Unit
+```
+
+Each directory holds `lcov.info`, `coverage.json` and `html/index.html`.
+`make coverage COVERAGE_MIN_LINES=0 COVERAGE_MIN_FUNCTIONS=0` produces the
+report without failing, which is handy while working towards the gate.
+
+In CI each workflow shows its own suite's report: the **Code Coverage** job in
+`build.yaml` writes unit, integration and combined tables to its job summary
+and uploads `coverage-unit`, `coverage-integration` and `coverage-all` HTML
+artifacts; the **E2E coverage report** job in `e2e.yaml` does the same for the
+e2e suite (`coverage-e2e`). All four also go to Codecov under the flags
+`unit`, `integration` and `e2e`.
+
 ## CI
 
 All CI logic lives in Makefile targets; the workflows only call them.
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `build.yaml` | PRs, pushes to `main`, releases | License headers, signed commits, fmt, clippy, build (tests in the x86_64 leg on PRs), SBOM, `cargo audit` / `cargo deny`, coverage, benchmark compile; on release, signing, SLSA provenance, release assets and crates.io publish. `PR Checks Passed` is the single required check. |
-| `e2e.yaml` | PRs touching the parser, writer or e2e suite; called by Dependabot auto-merge | The BIND9 e2e suite across BIND 9.18 and 9.20; `E2E gate` is the aggregate check. |
+| `build.yaml` | PRs, pushes to `main`, releases | License headers, signed commits, fmt, clippy, build (tests in the x86_64 leg on PRs), SBOM, `cargo audit` / `cargo deny`, coverage (unit, integration and combined reports in the job summary, 100% line and function gate), benchmark compile; on release, signing, SLSA provenance, release assets and crates.io publish. `PR Checks Passed` is the single required check. |
+| `e2e.yaml` | PRs touching the parser, writer or e2e suite; called by Dependabot auto-merge | The BIND9 e2e suite across BIND 9.18 and 9.20; `E2E gate` is the aggregate check. An instrumented second run per BIND version feeds the e2e coverage report (not gated). |
 | `docs.yaml` | Docs or source changes | Builds the MkDocs site and publishes it from `main`. |
 | `bench.yaml` | Pushes to `main` | Criterion benchmarks on x86_64 and ARM64. |
 | `codeql.yml`, `scorecard.yml`, `license-scan.yaml` | Schedule and PRs | Static analysis, OpenSSF Scorecard, dependency license report. |

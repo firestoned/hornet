@@ -1,0 +1,46 @@
+; Copyright (c) 2025 Erick Bourgeois, firestoned
+; SPDX-License-Identifier: Apache-2.0
+;
+; Every RR type hornet models that BIND9 also serves, plus $ORIGIN changes,
+; per-record TTLs, a wildcard and a multi-string TXT. TXT records sit at the
+; end of the file on purpose: the record after a TXT is a known parser bug
+; (tests/e2e/known-failures.txt) and is covered by example.com.zone.
+$TTL 3600
+$ORIGIN records.example.
+
+@       IN  SOA ns1.records.example. hostmaster.records.example. (
+                2026100501  ; serial
+                7200        ; refresh
+                3600        ; retry
+                1209600     ; expire
+                300 )       ; minimum
+
+@               IN  NS      ns1.records.example.
+ns1             IN  A       192.0.2.1
+ns1             IN  AAAA    2001:db8::1
+@          600  IN  A       192.0.2.10
+*.wild          IN  A       192.0.2.11
+alias           IN  CNAME   ns1
+@               IN  MX      10 mx1.records.example.
+mx1             IN  A       192.0.2.12
+host            IN  HINFO   "x86_64" "Linux"
+ptr             IN  PTR     host.records.example.
+_sip._udp       IN  SRV     10 60 5060 ns1.records.example.
+@               IN  CAA     0 issue "ca.example.net"
+@               IN  CAA     128 iodef "mailto:security@records.example"
+host            IN  SSHFP   4 2 861B7475A20565E1B7D87712682F089DB3BB7ED747121DE2FDFE6AD02DC9133E
+_443._tcp.www   IN  TLSA    3 1 1 861B7475A20565E1B7D87712682F089DB3BB7ED747121DE2FDFE6AD02DC9133E
+@               IN  NAPTR   100 10 "S" "SIP+D2U" "" _sip._udp.records.example.
+@               IN  LOC     52 22 23.000 N 4 53 32.000 E -2.00m 0.00m 10000m 10m
+child           IN  NS      ns.child.records.example.
+ns.child        IN  A       192.0.2.20
+child           IN  DS      12345 13 2 861B7475A20565E1B7D87712682F089DB3BB7ED747121DE2FDFE6AD02DC9133E
+@               IN  HTTPS   1 . alpn="h2,h3"
+_dns.ns1        IN  SVCB    1 ns1.records.example. alpn="dot" port=853
+
+$ORIGIN sub.records.example.
+www             IN  A       192.0.2.30
+mail            IN  MX      5 www
+
+$ORIGIN records.example.
+@               IN  TXT     "v=spf1" "a" "mx" "-all"

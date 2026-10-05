@@ -85,13 +85,92 @@ bench-compile: ## Compile all benchmarks without running them (fast CI check)
 
 ##@ Coverage
 
+# Coverage policy: docs/adr/0002-coverage-policy-and-per-suite-reports.md.
+# Unit + integration together are gated on lines and functions; regions are
+# reported, not gated. Each suite also gets its own report so CI can show
+# what each kind of test actually exercises.
+COVERAGE_DIR           ?= target/coverage
+COVERAGE_MIN_LINES     ?= 100
+COVERAGE_MIN_FUNCTIONS ?= 100
+# Test-only files are not product code; their unreached panic arms would
+# otherwise count as missed lines.
+COVERAGE_IGNORE        ?= (_tests\.rs|/tests/|/benches/)
+LLVM_COV_IGNORE        := --ignore-filename-regex '$(COVERAGE_IGNORE)'
+LLVM_COV_FLAGS         := --all-features
+
+# coverage_report <suite>: write lcov, json and html for the profiles
+# collected so far into $(COVERAGE_DIR)/<suite>/.
+define coverage_report
+	@mkdir -p $(COVERAGE_DIR)/$(1)
+	cargo llvm-cov report $(LLVM_COV_IGNORE) --lcov --output-path $(COVERAGE_DIR)/$(1)/lcov.info
+	cargo llvm-cov report $(LLVM_COV_IGNORE) --json --output-path $(COVERAGE_DIR)/$(1)/coverage.json
+	cargo llvm-cov report $(LLVM_COV_IGNORE) --html --output-dir $(COVERAGE_DIR)/$(1)
+	cargo llvm-cov report $(LLVM_COV_IGNORE) --summary-only
+endef
+
+.PHONY: coverage-unit
+coverage-unit: ## Coverage of the library unit tests (src/**/*_tests.rs) into target/coverage/unit/
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov $(LLVM_COV_FLAGS) --lib --no-report
+	$(call coverage_report,unit)
+
+.PHONY: coverage-integration
+coverage-integration: ## Coverage of the integration tests (tests/*.rs, incl. CLI runs) into target/coverage/integration/
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov $(LLVM_COV_FLAGS) --test '*' --no-report
+	$(call coverage_report,integration)
+
+.PHONY: coverage
+coverage: ## Unit + integration coverage into target/coverage/all/, gated on COVERAGE_MIN_LINES / COVERAGE_MIN_FUNCTIONS (default 100)
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov $(LLVM_COV_FLAGS) --lib --bins --test '*' --no-report
+	$(call coverage_report,all)
+	cargo llvm-cov report $(LLVM_COV_IGNORE) --summary-only \
+		--fail-under-lines $(COVERAGE_MIN_LINES) --fail-under-functions $(COVERAGE_MIN_FUNCTIONS)
+
 .PHONY: coverage-lcov
-coverage-lcov: ## Generate LCOV coverage report (lcov.info)
-	cargo llvm-cov --all-features --lcov --output-path lcov.info
+coverage-lcov: coverage ## Alias: combined coverage; LCOV at target/coverage/all/lcov.info
 
 .PHONY: coverage-html
-coverage-html: ## Generate HTML coverage report
-	cargo llvm-cov --all-features --html
+coverage-html: coverage ## Alias: combined coverage; HTML at target/coverage/all/html/index.html
+
+COVERAGE_JSON  ?= $(COVERAGE_DIR)/all/coverage.json
+COVERAGE_LCOV  ?= $(patsubst %/coverage.json,%/lcov.info,$(COVERAGE_JSON))
+COVERAGE_TITLE ?= Coverage
+
+.PHONY: coverage-summary
+coverage-summary: ## Print a Markdown coverage table (usage: make coverage-summary COVERAGE_JSON=target/coverage/unit/coverage.json COVERAGE_TITLE=Unit)
+	@./scripts/coverage-summary.sh "$(COVERAGE_JSON)" "$(COVERAGE_TITLE)" "$(COVERAGE_LCOV)"
+
+# ── e2e coverage ─────────────────────────────────────────────────────────────
+# The e2e suite drives a real hornet binary from a shell script, so
+# cargo-llvm-cov's test runner is not involved: build an instrumented binary,
+# point LLVM_PROFILE_FILE at a directory, run the suite, then merge and export
+# with the rustup llvm-tools directly. Every step works from files alone, so CI
+# can build, run and report in different jobs.
+COVERAGE_E2E_DIR     ?= $(COVERAGE_DIR)/e2e
+COVERAGE_E2E_BIN     ?= $(COVERAGE_E2E_DIR)/bin/hornet
+COVERAGE_E2E_PROFRAW ?= $(COVERAGE_E2E_DIR)/profraw
+
+.PHONY: coverage-e2e
+coverage-e2e: coverage-e2e-build ## e2e coverage: instrumented hornet through every BIND_VERSIONS run, report in target/coverage/e2e/ (not gated)
+	@rm -rf $(COVERAGE_E2E_PROFRAW)
+	@set -e; for v in $(BIND_VERSIONS); do \
+		$(MAKE) --no-print-directory coverage-e2e-run BIND_VERSION=$$v; \
+	done
+	@$(MAKE) --no-print-directory coverage-e2e-report
+
+.PHONY: coverage-e2e-build
+coverage-e2e-build: ## Build a coverage-instrumented hornet at target/coverage/e2e/bin/hornet
+	./scripts/coverage-e2e.sh build "$(COVERAGE_E2E_DIR)"
+
+.PHONY: coverage-e2e-run
+coverage-e2e-run: ## Run the e2e suite once with the instrumented binary, collecting profiles (BIND_VERSION=...)
+	./scripts/coverage-e2e.sh run "$(COVERAGE_E2E_DIR)" "$(BIND_VERSION)" "$(CONTAINER_RUNTIME)"
+
+.PHONY: coverage-e2e-report
+coverage-e2e-report: ## Merge e2e profiles into lcov, json and html under target/coverage/e2e/
+	./scripts/coverage-e2e.sh report "$(COVERAGE_E2E_DIR)" '$(COVERAGE_IGNORE)'
 
 ##@ Supply chain
 

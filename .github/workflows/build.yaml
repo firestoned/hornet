@@ -8,7 +8,8 @@
 #
 #   - pull_request : changes filter + lint (format/clippy) + build (Linux,
 #                    tests run in the x86_64 leg) + build-extras (macOS and
-#                    Windows) + SBOM + coverage + bench-compile + security +
+#                    Windows) + SBOM + coverage (unit, integration and
+#                    combined reports, 100% gate) + bench-compile + security +
 #                    "PR Checks Passed" aggregate gate
 #   - push (main)  : build (Linux, no tests: already tested on the PR) +
 #                    SBOM + coverage + security
@@ -313,6 +314,13 @@ jobs:
           if-no-files-found: error
 
   # ── Coverage (PR and main) ────────────────────────────────────────────────
+  # ADR-0002. Three reports, one per scope, so the job summary shows what each
+  # kind of test actually exercises: unit tests alone, integration tests alone
+  # (tests/*.rs, including CLI runs of the binary), and the two combined. The
+  # combined report is gated at 100% lines and functions; regions are reported
+  # but not gated. Each report goes to the job summary as a Markdown table, to
+  # an HTML artifact, and to Codecov under its own flag. E2E coverage is
+  # reported by e2e.yaml.
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
@@ -335,24 +343,69 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Generate coverage report
-        run: make coverage-lcov
+      # ── Unit ──
+      - name: Unit test coverage
+        run: make coverage-unit
 
-      - name: Upload coverage to Codecov
+      - name: Unit coverage summary
+        run: make coverage-summary COVERAGE_JSON=target/coverage/unit/coverage.json COVERAGE_TITLE="Unit test coverage" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unit coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: lcov.info
+          files: target/coverage/unit/lcov.info
+          flags: unit
+          disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Generate HTML coverage report
-        run: make coverage-html
-
-      - name: Upload HTML coverage as artifact
+      - name: Upload unit coverage HTML
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: coverage-report
-          path: target/llvm-cov/html/
+          name: coverage-unit
+          path: target/coverage/unit/html/
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+      # ── Integration ──
+      - name: Integration test coverage
+        run: make coverage-integration
+
+      - name: Integration coverage summary
+        run: make coverage-summary COVERAGE_JSON=target/coverage/integration/coverage.json COVERAGE_TITLE="Integration test coverage" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: target/coverage/integration/lcov.info
+          flags: integration
+          disable_search: true
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload integration coverage HTML
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-integration
+          path: target/coverage/integration/html/
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+      # ── Combined (gated) ──
+      # `make coverage` writes the reports first and gates last, so the summary
+      # and artifact below still publish when the gate fails.
+      - name: Combined coverage (gate)
+        id: combined
+        run: make coverage
+
+      - name: Combined coverage summary
+        if: ${{ !cancelled() && hashFiles('target/coverage/all/coverage.json') != '' }}
+        run: make coverage-summary COVERAGE_JSON=target/coverage/all/coverage.json COVERAGE_TITLE="Combined coverage (unit + integration, gated at 100% lines and functions)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload combined coverage HTML
+        if: ${{ !cancelled() && hashFiles('target/coverage/all/coverage.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-all
+          path: target/coverage/all/html/
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
   # ── Benchmarks compile (PR only; bench.yaml runs them) ────────────────────

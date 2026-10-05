@@ -30,6 +30,7 @@ takes the number at the end of its section and everything after it shifts up.
 | # | File | What |
 |---|---|---|
 | 01 | [`01-ci-and-supply-chain.md`](01-ci-and-supply-chain.md) | One event-gated `build.yaml`, `e2e.yaml` against real BIND9, SHA-pinned actions, gated Dependabot auto-merge |
+| 02 | [`02-test-coverage.md`](02-test-coverage.md) | 100% line and function coverage gate; per-suite coverage reports in every workflow |
 
 ## Privately tracked roadmaps
 

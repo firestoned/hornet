@@ -60,3 +60,6 @@ pub(super) fn escape(s: &str) -> String {
 pub(super) fn quoted(s: &str) -> String {
     format!("\"{}\"", escape(s))
 }
+
+#[cfg(test)]
+mod mod_tests;

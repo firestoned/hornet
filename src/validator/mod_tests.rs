@@ -782,4 +782,168 @@ mod tests {
         let diags = validate_named_conf(&conf);
         assert!(!diags.iter().any(|d| d.message.contains("undefined ACL")));
     }
+
+    // ── named.conf: zones inside views, other options ACL lists, negation ───────
+
+    #[test]
+    fn test_zone_inside_view_is_validated() {
+        let conf = NamedConf {
+            statements: vec![Statement::View(ViewStmt {
+                name: "internal".to_string(),
+                class: None,
+                options: ViewOptions {
+                    match_clients: Some(vec![AddressMatchElement::Any]),
+                    zones: vec![ZoneStmt {
+                        name: "example.com".to_string(),
+                        class: None,
+                        options: ZoneOptions {
+                            zone_type: Some(ZoneType::Primary),
+                            ..Default::default()
+                        },
+                    }],
+                    ..Default::default()
+                },
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == Severity::Warning && d.message.contains("example.com")));
+    }
+
+    #[test]
+    fn test_allow_recursion_undefined_acl_is_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                allow_recursion: Some(vec![AddressMatchElement::AclRef("nope".to_string())]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(diags.iter().any(|d| d.severity == Severity::Error
+            && d.message.contains("options allow-recursion")
+            && d.message.contains("\"nope\"")));
+    }
+
+    #[test]
+    fn test_blackhole_undefined_acl_is_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                blackhole: Some(vec![AddressMatchElement::AclRef("bogons".to_string())]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(diags.iter().any(|d| d.severity == Severity::Error
+            && d.message.contains("options blackhole")
+            && d.message.contains("\"bogons\"")));
+    }
+
+    #[test]
+    fn test_negated_undefined_acl_is_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                allow_query: Some(vec![AddressMatchElement::Negated(Box::new(
+                    AddressMatchElement::AclRef("missing".to_string()),
+                ))]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("\"missing\"")));
+    }
+
+    #[test]
+    fn test_valid_ipv6_cidr_no_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                allow_query: Some(vec![AddressMatchElement::Cidr {
+                    addr: "2001:db8::".parse().unwrap(),
+                    prefix_len: 64,
+                }]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(!diags.iter().any(|d| d.message.contains("CIDR prefix")));
+    }
+
+    #[test]
+    fn test_ipv6_cidr_prefix_too_large_is_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                allow_query: Some(vec![AddressMatchElement::Cidr {
+                    addr: "2001:db8::".parse().unwrap(),
+                    prefix_len: 129,
+                }]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("/129")));
+    }
+
+    #[test]
+    fn test_logging_non_file_channels_without_severity_no_info() {
+        let channel = |name: &str, destination: LogDestination| LogChannel {
+            name: name.to_string(),
+            destination,
+            severity: None,
+            print_time: None,
+            print_severity: None,
+            print_category: None,
+            buffered: None,
+        };
+        let conf = NamedConf {
+            statements: vec![Statement::Logging(LoggingBlock {
+                channels: vec![
+                    channel("to-syslog", LogDestination::Syslog(None)),
+                    channel("to-stderr", LogDestination::Stderr),
+                    channel("to-null", LogDestination::Null),
+                ],
+                categories: vec![],
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(!diags.iter().any(|d| d.message.contains("no severity")));
+    }
+
+    #[test]
+    fn test_keyword_address_elements_no_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                allow_query: Some(vec![AddressMatchElement::Any, AddressMatchElement::None]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn test_zone_file_with_origin_directive_is_valid() {
+        let mut zone = minimal_valid_zone();
+        zone.entries
+            .insert(0, Entry::Origin(Name::new("example.com.")));
+        let diags = validate_zone_file(&zone);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn test_negated_builtin_acl_no_error() {
+        let conf = NamedConf {
+            statements: vec![Statement::Options(OptionsBlock {
+                allow_query: Some(vec![AddressMatchElement::Negated(Box::new(
+                    AddressMatchElement::AclRef("none".to_string()),
+                ))]),
+                ..Default::default()
+            })],
+        };
+        let diags = validate_named_conf(&conf);
+        assert!(!diags.iter().any(|d| d.message.contains("undefined ACL")));
+    }
 }
