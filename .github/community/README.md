@@ -37,6 +37,7 @@ takes the number at the end of its section and everything after it shifts up.
 | # | File | What |
 |---|---|---|
 | 03 | [`03-grammar-fidelity-follow-ups.md`](03-grammar-fidelity-follow-ups.md) | AST and grammar gaps found while hardening 0.2.0 (inet without port, forwarders, classes, case, BIND 9.20 removals) |
+| 04 | [`04-bindy-rendering-support.md`](04-bindy-rendering-support.md) | What bindy renders, typed for 0.3.0: `print-time`, `dnssec-policy`, `allow-new-zones` / `key-directory`; `miette/fancy` only with `cli` |
 
 ## Privately tracked roadmaps
 

@@ -482,7 +482,7 @@ mod tests {
             assert_eq!(l.channels.len(), 1);
             let ch = &l.channels[0];
             assert_eq!(ch.name, "default_log");
-            assert_eq!(ch.print_time, Some(true));
+            assert_eq!(ch.print_time, Some(PrintTime::Yes));
             assert!(matches!(ch.severity, Some(LogSeverity::Info)));
         } else {
             panic!("expected Logging");
@@ -1450,6 +1450,27 @@ mod tests {
         ("server", "server 192.0.2.1 { edns yes x; };"),
         ("server", "server 192.0.2.1 { request-nsid maybe; };"),
         ("server", "server 192.0.2.1 { request-nsid yes x; };"),
+        // options: typed for 0.3.0 (ADR-0004)
+        ("options", "options { allow-new-zones maybe; };"),
+        ("options", "options { allow-new-zones yes x; };"),
+        ("options", "options { key-directory ; };"),
+        ("options", r#"options { key-directory "/k" x; };"#),
+        ("options", "options { dnssec-policy ; };"),
+        ("options", r#"options { dnssec-policy "p" x; };"#),
+        // logging: print-time values outside the grammar
+        (
+            "logging",
+            "logging { channel c { print-time iso8601 x; }; };",
+        ),
+        (
+            "logging",
+            "logging { channel c { print-time iso8601x; }; };",
+        ),
+        // dnssec-policy: header and block structure
+        ("dnssec-policy", "dnssec-policy { };"),
+        ("dnssec-policy", r#"dnssec-policy "p" x;"#),
+        ("dnssec-policy", r#"dnssec-policy "p" { } x;"#),
+        ("dnssec-policy", r#"dnssec-policy "p" { {x}; };"#),
     ];
 
     #[test]
@@ -2125,5 +2146,331 @@ mod tests {
         let conf = parse(r#"zone "a" { type forward; forwarders { }; };"#);
         assert!(zone(&conf).options.forwarders.is_empty());
         assert!(zone(&conf).options.extra.is_empty());
+    }
+
+    // ── print-time (ADR-0004) ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_print_time_every_value() {
+        let cases = [
+            ("yes", PrintTime::Yes),
+            ("no", PrintTime::No),
+            ("local", PrintTime::Local),
+            ("iso8601", PrintTime::Iso8601),
+            ("iso8601-utc", PrintTime::Iso8601Utc),
+            ("ISO8601", PrintTime::Iso8601),
+            ("ISO8601-UTC", PrintTime::Iso8601Utc),
+            ("Local", PrintTime::Local),
+        ];
+        for (text, expected) in cases {
+            let conf = parse(&format!(
+                "logging {{ channel c {{ stderr; print-time {text}; }}; }};"
+            ));
+            assert_eq!(channel(&conf).print_time, Some(expected), "{text}");
+        }
+    }
+
+    #[test]
+    fn test_parse_bindy_logging_block_is_typed() {
+        let conf = parse(
+            r"logging {
+                channel default_stderr {
+                    stderr;
+                    severity info;
+                    print-time iso8601;
+                    print-category yes;
+                    print-severity yes;
+                };
+                category default { default_stderr; };
+            };",
+        );
+        let ch = channel(&conf);
+        assert_eq!(ch.print_time, Some(PrintTime::Iso8601));
+        assert_eq!(ch.print_category, Some(true));
+        assert_eq!(logging(&conf).categories.len(), 1);
+    }
+
+    // ── options: allow-new-zones, key-directory, dnssec-policy (ADR-0004) ─────
+
+    #[test]
+    fn test_parse_options_allow_new_zones_key_directory_dnssec_policy() {
+        let conf = parse(
+            r#"options {
+                allow-new-zones yes;
+                key-directory "/var/cache/bind/keys";
+                dnssec-policy "bindy";
+            };"#,
+        );
+        let o = options(&conf);
+        assert_eq!(o.allow_new_zones, Some(true));
+        assert_eq!(o.key_directory.as_deref(), Some("/var/cache/bind/keys"));
+        assert_eq!(o.dnssec_policy.as_deref(), Some("bindy"));
+        assert!(o.extra.is_empty(), "{:?}", o.extra);
+    }
+
+    #[test]
+    fn test_parse_options_allow_new_zones_no() {
+        let conf = parse("options { allow-new-zones no; dnssec-policy none; };");
+        assert_eq!(options(&conf).allow_new_zones, Some(false));
+        assert_eq!(options(&conf).dnssec_policy.as_deref(), Some("none"));
+    }
+
+    // ── dnssec-policy (ADR-0004) ───────────────────────────────────────────────
+
+    fn policy(conf: &NamedConf) -> &DnssecPolicyStmt {
+        let Statement::DnssecPolicy(p) = &conf.statements[0] else {
+            panic!("expected DnssecPolicy, got {:?}", conf.statements[0]);
+        };
+        p
+    }
+
+    /// Exactly what bindy renders (bindy `DNSSEC_POLICY_TEMPLATE`), comments
+    /// included.
+    const BINDY_POLICY: &str = r#"
+dnssec-policy "bindy" {
+    // Key configuration
+    keys {
+        ksk lifetime 365d algorithm ECDSAP256SHA256;
+        zsk lifetime 90d algorithm ECDSAP256SHA256;
+    };
+
+    // Authenticated denial of existence (NSEC3)
+    nsec3param iterations 0 optout no salt-length 16;
+
+    // Signature validity periods
+    signatures-refresh 5d;
+    signatures-validity 30d;
+    signatures-validity-dnskey 30d;
+
+    // Zone propagation delay (time for zone updates to reach all servers)
+    zone-propagation-delay 300;  // 5 minutes
+
+    // Parent propagation delay (time for DS updates in parent zone)
+    parent-propagation-delay 3600;  // 1 hour
+
+    // Maximum zone TTL (affects key rollover timing)
+    max-zone-ttl 86400;  // 24 hours
+};
+"#;
+
+    #[test]
+    fn test_parse_bindy_dnssec_policy() {
+        let conf = parse(BINDY_POLICY);
+        let p = policy(&conf);
+        assert_eq!(p.name, "bindy");
+        assert_eq!(
+            p.keys,
+            Some(vec![
+                DnssecPolicyKey {
+                    role: DnssecKeyRole::Ksk,
+                    storage: None,
+                    lifetime: DnssecKeyLifetime::Duration("365d".to_string()),
+                    algorithm: "ECDSAP256SHA256".to_string(),
+                    tag_range: None,
+                    bits: None,
+                },
+                DnssecPolicyKey {
+                    role: DnssecKeyRole::Zsk,
+                    storage: None,
+                    lifetime: DnssecKeyLifetime::Duration("90d".to_string()),
+                    algorithm: "ECDSAP256SHA256".to_string(),
+                    tag_range: None,
+                    bits: None,
+                },
+            ])
+        );
+        assert_eq!(
+            p.nsec3param,
+            Some(Nsec3Param {
+                iterations: Some(0),
+                optout: Some(false),
+                salt_length: Some(16),
+            })
+        );
+        assert_eq!(p.signatures_refresh.as_deref(), Some("5d"));
+        assert_eq!(p.signatures_validity.as_deref(), Some("30d"));
+        assert_eq!(p.signatures_validity_dnskey.as_deref(), Some("30d"));
+        assert_eq!(p.zone_propagation_delay.as_deref(), Some("300"));
+        assert_eq!(p.parent_propagation_delay.as_deref(), Some("3600"));
+        assert_eq!(p.max_zone_ttl.as_deref(), Some("86400"));
+        assert!(p.extra.is_empty(), "{:?}", p.extra);
+    }
+
+    #[test]
+    fn test_parse_dnssec_policy_without_nsec3param_means_nsec() {
+        let conf =
+            parse(r"dnssec-policy bindy { keys { csk lifetime unlimited algorithm 13; }; };");
+        let p = policy(&conf);
+        assert_eq!(p.name, "bindy");
+        assert!(p.nsec3param.is_none());
+        let keys = p.keys.as_ref().unwrap();
+        assert_eq!(keys[0].role, DnssecKeyRole::Csk);
+        assert_eq!(keys[0].lifetime, DnssecKeyLifetime::Unlimited);
+        assert_eq!(keys[0].algorithm, "13");
+    }
+
+    #[test]
+    fn test_parse_dnssec_policy_full_920_grammar() {
+        let conf = parse(
+            r#"dnssec-policy "full" {
+                cdnskey no;
+                cds-digest-types { 2; "sha-384"; };
+                dnskey-ttl PT1H;
+                inline-signing yes;
+                keys {
+                    CSK key-store "hsm" lifetime unlimited algorithm ecdsa256 tag-range 0 32767;
+                    ksk key-directory lifetime P1Y algorithm rsasha256 tag-range 1 2 2048;
+                    zsk lifetime 1w2d algorithm RSASHA256 1024;
+                };
+                manual-mode no;
+                max-zone-ttl 1d;
+                nsec3param;
+                offline-ksk no;
+                parent-ds-ttl 1d;
+                parent-propagation-delay 1h;
+                publish-safety 1h;
+                purge-keys P90D;
+                retire-safety 2d;
+                signatures-jitter 12h;
+                signatures-refresh 5d;
+                signatures-validity 2w;
+                signatures-validity-dnskey 2w;
+                zone-propagation-delay PT5M;
+            };"#,
+        );
+        let p = policy(&conf);
+        assert_eq!(p.cdnskey, Some(false));
+        assert_eq!(
+            p.cds_digest_types,
+            Some(vec!["2".to_string(), "sha-384".to_string()])
+        );
+        assert_eq!(p.dnskey_ttl.as_deref(), Some("PT1H"));
+        assert_eq!(p.inline_signing, Some(true));
+        assert_eq!(p.manual_mode, Some(false));
+        assert_eq!(p.max_zone_ttl.as_deref(), Some("1d"));
+        assert_eq!(p.nsec3param, Some(Nsec3Param::default()));
+        assert_eq!(p.offline_ksk, Some(false));
+        assert_eq!(p.parent_ds_ttl.as_deref(), Some("1d"));
+        assert_eq!(p.parent_propagation_delay.as_deref(), Some("1h"));
+        assert_eq!(p.publish_safety.as_deref(), Some("1h"));
+        assert_eq!(p.purge_keys.as_deref(), Some("P90D"));
+        assert_eq!(p.retire_safety.as_deref(), Some("2d"));
+        assert_eq!(p.signatures_jitter.as_deref(), Some("12h"));
+        assert_eq!(p.signatures_refresh.as_deref(), Some("5d"));
+        assert_eq!(p.signatures_validity.as_deref(), Some("2w"));
+        assert_eq!(p.signatures_validity_dnskey.as_deref(), Some("2w"));
+        assert_eq!(p.zone_propagation_delay.as_deref(), Some("PT5M"));
+        let keys = p.keys.as_ref().unwrap();
+        assert_eq!(
+            keys[0],
+            DnssecPolicyKey {
+                role: DnssecKeyRole::Csk,
+                storage: Some(DnssecKeyStorage::KeyStore("hsm".to_string())),
+                lifetime: DnssecKeyLifetime::Unlimited,
+                algorithm: "ecdsa256".to_string(),
+                tag_range: Some((0, 32767)),
+                bits: None,
+            }
+        );
+        assert_eq!(
+            keys[1],
+            DnssecPolicyKey {
+                role: DnssecKeyRole::Ksk,
+                storage: Some(DnssecKeyStorage::KeyDirectory),
+                lifetime: DnssecKeyLifetime::Duration("P1Y".to_string()),
+                algorithm: "rsasha256".to_string(),
+                tag_range: Some((1, 2)),
+                bits: Some(2048),
+            }
+        );
+        assert_eq!(keys[2].bits, Some(1024));
+        assert_eq!(keys[2].tag_range, None);
+        assert!(p.extra.is_empty(), "{:?}", p.extra);
+    }
+
+    #[test]
+    fn test_parse_dnssec_policy_empty_and_absent_keys_differ() {
+        let empty = parse(r#"dnssec-policy "a" { keys { }; };"#);
+        assert_eq!(policy(&empty).keys, Some(vec![]));
+        let absent = parse(r#"dnssec-policy "a" { };"#);
+        assert_eq!(policy(&absent).keys, None);
+    }
+
+    #[test]
+    fn test_parse_dnssec_policy_nsec3param_partial() {
+        let conf = parse(r#"dnssec-policy "a" { nsec3param optout yes; };"#);
+        assert_eq!(
+            policy(&conf).nsec3param,
+            Some(Nsec3Param {
+                iterations: None,
+                optout: Some(true),
+                salt_length: None,
+            })
+        );
+    }
+
+    /// A clause hornet models, with a value outside its typed grammar, is kept
+    /// verbatim in the policy's `extra` and the rest of the policy stays typed.
+    #[test]
+    fn test_parse_dnssec_policy_untypable_values_kept_raw() {
+        for (key, value) in [
+            ("keys", "{ foo lifetime 1d algorithm 13; }"),
+            ("keys", "{ csk lifetime 1y algorithm 13; }"),
+            ("keys", "{ csk lifetime UNLIMITED algorithm 13; }"),
+            ("keys", r#"{ csk lifetime unlimited algorithm "13"; }"#),
+            (
+                "keys",
+                "{ csk lifetime unlimited algorithm 13 2048 tag-range 0 1; }",
+            ),
+            (
+                "keys",
+                "{ csk lifetime unlimited algorithm 13 tag-range 0 70000; }",
+            ),
+            ("keys", "{ csk lifetime unlimited algorithm 13 }"),
+            ("keys", "{ csk algorithm 13; }"),
+            ("keys", "{ csk lifetime unlimited; }"),
+            ("keys", "{ csk key-store lifetime unlimited algorithm 13; }"),
+            ("keys", "csk"),
+            ("cdnskey", "maybe"),
+            ("inline-signing", "maybe"),
+            ("manual-mode", "maybe"),
+            ("offline-ksk", "maybe"),
+            ("cds-digest-types", "2"),
+            ("cds-digest-types", "{ 2; } x"),
+            ("cds-digest-types", "{ 2; x }"),
+            ("dnskey-ttl", "1y"),
+            ("max-zone-ttl", "unlimited"),
+            ("parent-ds-ttl", "\"1d\""),
+            ("parent-propagation-delay", "1h30"),
+            ("publish-safety", "P1W2D"),
+            ("purge-keys", "x"),
+            ("retire-safety", "x"),
+            ("signatures-jitter", "x"),
+            ("signatures-refresh", "5d 6d"),
+            ("signatures-validity", "x"),
+            ("signatures-validity-dnskey", "x"),
+            ("zone-propagation-delay", "x"),
+            ("nsec3param", "salt-length 8 iterations 0"),
+            ("nsec3param", "iterations x"),
+            ("some-future-clause", "value"),
+        ] {
+            let conf = parse(&format!(
+                r#"dnssec-policy "p" {{ {key} {value}; signatures-refresh 5d; }};"#
+            ));
+            let p = policy(&conf);
+            assert_eq!(
+                p.extra,
+                vec![(key.to_string(), value.to_string())],
+                "{key} {value}"
+            );
+            if key != "signatures-refresh" {
+                assert_eq!(p.signatures_refresh.as_deref(), Some("5d"), "{key}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_dnssec_policy_unterminated_is_an_error() {
+        assert!(parse_named_conf(r#"dnssec-policy "p" { keys {"#).is_err());
     }
 }

@@ -163,6 +163,10 @@ fn main() -> miette::Result<()> {
 }
 ```
 
+Graphical rendering needs miette's `fancy` feature, which hornet enables only with its
+`cli` feature (since 0.3.0); add `features = ["fancy"]` to your own `miette` dependency
+to get it.
+
 The diagnostic code is `hornet_bind9::parse`, and the source shown is named after the
 `file` field. The highlighted span currently points at the start of the source; zone-file
 errors carry the line number in their message.

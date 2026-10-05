@@ -16,11 +16,12 @@
 
 use super::{indent, quoted, WriteOptions};
 use crate::ast::named_conf::{
-    AclStmt, AddressMatchElement, AddressMatchList, AutoDnssec, CheckNames, ControlsBlock,
-    DnsClass, DnssecValidation, KeyStmt, ListenOn, LogDestination, LogSeverity, LogVersions,
-    LoggingBlock, NamedConf, NotifyOption, OptionsBlock, PrimariesStmt, RateLimit, ResponsePolicy,
-    ServerStmt, Statement, SyslogFacility, TransferFormat, UpdateAction, UpdatePolicy, ViewStmt,
-    ZoneStmt, ZoneType,
+    is_duration, AclStmt, AddressMatchElement, AddressMatchList, AutoDnssec, CheckNames,
+    ControlsBlock, DnsClass, DnssecKeyLifetime, DnssecKeyStorage, DnssecPolicyKey,
+    DnssecPolicyStmt, DnssecValidation, KeyStmt, ListenOn, LogDestination, LogSeverity,
+    LogVersions, LoggingBlock, NamedConf, NotifyOption, Nsec3Param, OptionsBlock, PrimariesStmt,
+    RateLimit, ResponsePolicy, ServerStmt, Statement, SyslogFacility, TransferFormat, UpdateAction,
+    UpdatePolicy, ViewStmt, ZoneStmt, ZoneType,
 };
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -65,6 +66,7 @@ fn write_statement(out: &mut String, stmt: &Statement, depth: usize, opts: &Writ
         Statement::Key(k) => write_key(out, k, depth, opts),
         Statement::Primaries(p) => write_primaries(out, p, depth, opts),
         Statement::Server(s) => write_server(out, s, depth, opts),
+        Statement::DnssecPolicy(p) => write_dnssec_policy(out, p, depth, opts),
         Statement::Unknown { keyword, raw } => {
             indent(out, depth, opts);
             if raw.is_empty() {
@@ -109,6 +111,7 @@ fn write_options(out: &mut String, b: &OptionsBlock, depth: usize, opts: &WriteO
     opt_str!(b.version, "version");
     opt_str!(b.hostname, "hostname");
     opt_str!(b.server_id, "server-id");
+    opt_str!(b.key_directory, "key-directory");
 
     for lo in &b.listen_on {
         write_listen_on(out, "listen-on", lo, d, opts);
@@ -138,6 +141,7 @@ fn write_options(out: &mut String, b: &OptionsBlock, depth: usize, opts: &WriteO
     write_opt_aml(out, "blackhole", b.blackhole.as_ref(), d, opts);
 
     opt_bool!(b.recursion, "recursion");
+    opt_bool!(b.allow_new_zones, "allow-new-zones");
 
     if let Some(n) = &b.notify {
         indent(out, d, opts);
@@ -155,6 +159,7 @@ fn write_options(out: &mut String, b: &OptionsBlock, depth: usize, opts: &WriteO
         };
         let _ = writeln!(out, "dnssec-validation {s};");
     }
+    opt_str!(b.dnssec_policy, "dnssec-policy");
 
     if let Some(sz) = &b.max_cache_size {
         indent(out, d, opts);
@@ -175,14 +180,7 @@ fn write_options(out: &mut String, b: &OptionsBlock, depth: usize, opts: &WriteO
 
     write_response_policy(out, &b.response_policy, d, opts);
 
-    for (k, v) in &b.extra {
-        indent(out, d, opts);
-        if v.is_empty() {
-            let _ = writeln!(out, "{k};");
-        } else {
-            let _ = writeln!(out, "{k} {v};");
-        }
-    }
+    write_extra(out, &b.extra, d, opts);
 
     indent(out, depth, opts);
     out.push_str("};\n");
@@ -298,14 +296,7 @@ fn write_zone(
         let _ = writeln!(out, "max-journal-size {sz};");
     }
 
-    for (k, v) in &zo.extra {
-        indent(out, d, opts);
-        if v.is_empty() {
-            let _ = writeln!(out, "{k};");
-        } else {
-            let _ = writeln!(out, "{k} {v};");
-        }
-    }
+    write_extra(out, &zo.extra, d, opts);
 
     indent(out, depth, opts);
     out.push_str("};\n");
@@ -458,14 +449,7 @@ fn write_view(out: &mut String, v: &ViewStmt, depth: usize, opts: &WriteOptions)
         write_zone(out, zone, view_class, d, opts);
     }
 
-    for (k, v) in &v.options.extra {
-        indent(out, d, opts);
-        if v.is_empty() {
-            let _ = writeln!(out, "{k};");
-        } else {
-            let _ = writeln!(out, "{k} {v};");
-        }
-    }
+    write_extra(out, &v.options.extra, d, opts);
 
     indent(out, depth, opts);
     out.push_str("};\n");
@@ -525,6 +509,10 @@ fn write_logging(out: &mut String, l: &LoggingBlock, depth: usize, opts: &WriteO
             indent(out, dd, opts);
             let _ = writeln!(out, "severity {};", severity_str(sev));
         }
+        if let Some(pt) = ch.print_time {
+            indent(out, dd, opts);
+            let _ = writeln!(out, "print-time {pt};");
+        }
         macro_rules! channel_bool {
             ($field:expr, $key:expr) => {
                 if let Some(v) = $field {
@@ -533,7 +521,6 @@ fn write_logging(out: &mut String, l: &LoggingBlock, depth: usize, opts: &WriteO
                 }
             };
         }
-        channel_bool!(ch.print_time, "print-time");
         channel_bool!(ch.print_severity, "print-severity");
         channel_bool!(ch.print_category, "print-category");
         channel_bool!(ch.buffered, "buffered");
@@ -744,19 +731,160 @@ fn write_server(out: &mut String, s: &ServerStmt, depth: usize, opts: &WriteOpti
         indent(out, d, opts);
         out.push_str("};\n");
     }
-    for (k, v) in &s.options.extra {
+    write_extra(out, &s.options.extra, d, opts);
+    indent(out, depth, opts);
+    out.push_str("};\n");
+}
+
+// ── dnssec-policy ──────────────────────────────────────────────────────────────
+
+/// `dnssec-policy "<name>" { … };`: `keys` first, then the other clauses in
+/// BIND's (alphabetical) order, then `extra` verbatim. The name, `key-store`
+/// names and digest types are strings; durations and algorithms are tokens
+/// (ADR-0003, ADR-0004).
+fn write_dnssec_policy(out: &mut String, p: &DnssecPolicyStmt, depth: usize, opts: &WriteOptions) {
+    indent(out, depth, opts);
+    let _ = writeln!(out, "dnssec-policy {} {{", quoted(&p.name));
+    let d = depth + 1;
+    if let Some(keys) = &p.keys {
         indent(out, d, opts);
+        out.push_str("keys {\n");
+        for key in keys {
+            indent(out, d + 1, opts);
+            write_policy_key(out, key);
+        }
+        indent(out, d, opts);
+        out.push_str("};\n");
+    }
+    for (key, value) in policy_clauses(p) {
+        indent(out, d, opts);
+        if value.is_empty() {
+            let _ = writeln!(out, "{key};");
+        } else {
+            let _ = writeln!(out, "{key} {value};");
+        }
+    }
+    write_extra(out, &p.extra, d, opts);
+    indent(out, depth, opts);
+    out.push_str("};\n");
+}
+
+/// Every set policy clause other than `keys`, as (keyword, rendered value), in
+/// BIND's order. An empty value is a clause with no arguments (`nsec3param;`).
+fn policy_clauses(p: &DnssecPolicyStmt) -> Vec<(&'static str, String)> {
+    let flag = |v: Option<bool>| v.map(|b| yes_no(b).to_owned());
+    let dur = |v: &Option<String>| v.as_deref().map(duration_or_quoted);
+    let digest_types = p.cds_digest_types.as_ref().map(|types| {
+        let mut list = String::from("{");
+        for t in types {
+            let _ = write!(list, " {};", quoted(t));
+        }
+        list.push_str(" }");
+        list
+    });
+    [
+        ("cdnskey", flag(p.cdnskey)),
+        ("cds-digest-types", digest_types),
+        ("dnskey-ttl", dur(&p.dnskey_ttl)),
+        ("inline-signing", flag(p.inline_signing)),
+        ("manual-mode", flag(p.manual_mode)),
+        ("max-zone-ttl", dur(&p.max_zone_ttl)),
+        ("nsec3param", p.nsec3param.as_ref().map(nsec3param_args)),
+        ("offline-ksk", flag(p.offline_ksk)),
+        ("parent-ds-ttl", dur(&p.parent_ds_ttl)),
+        ("parent-propagation-delay", dur(&p.parent_propagation_delay)),
+        ("publish-safety", dur(&p.publish_safety)),
+        ("purge-keys", dur(&p.purge_keys)),
+        ("retire-safety", dur(&p.retire_safety)),
+        ("signatures-jitter", dur(&p.signatures_jitter)),
+        ("signatures-refresh", dur(&p.signatures_refresh)),
+        ("signatures-validity", dur(&p.signatures_validity)),
+        (
+            "signatures-validity-dnskey",
+            dur(&p.signatures_validity_dnskey),
+        ),
+        ("zone-propagation-delay", dur(&p.zone_propagation_delay)),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|v| (key, v)))
+    .collect()
+}
+
+/// One `keys` entry, terminated by `;` and a newline.
+fn write_policy_key(out: &mut String, key: &DnssecPolicyKey) {
+    let _ = write!(out, "{}", key.role);
+    match &key.storage {
+        Some(DnssecKeyStorage::KeyDirectory) => out.push_str(" key-directory"),
+        Some(DnssecKeyStorage::KeyStore(name)) => {
+            let _ = write!(out, " key-store {}", quoted(name));
+        }
+        None => {}
+    }
+    let lifetime = match &key.lifetime {
+        DnssecKeyLifetime::Unlimited => "unlimited".to_owned(),
+        DnssecKeyLifetime::Duration(d) => duration_or_quoted(d),
+    };
+    let _ = write!(
+        out,
+        " lifetime {lifetime} algorithm {}",
+        algorithm_or_quoted(&key.algorithm)
+    );
+    if let Some((lo, hi)) = key.tag_range {
+        let _ = write!(out, " tag-range {lo} {hi}");
+    }
+    if let Some(bits) = key.bits {
+        let _ = write!(out, " {bits}");
+    }
+    out.push_str(";\n");
+}
+
+/// The arguments of `nsec3param`, space-separated (empty when none).
+fn nsec3param_args(n: &Nsec3Param) -> String {
+    let mut args = Vec::new();
+    if let Some(i) = n.iterations {
+        args.push(format!("iterations {i}"));
+    }
+    if let Some(o) = n.optout {
+        args.push(format!("optout {}", yes_no(o)));
+    }
+    if let Some(l) = n.salt_length {
+        args.push(format!("salt-length {l}"));
+    }
+    args.join(" ")
+}
+
+/// A duration bare when it is one (see [`is_duration`]), quoted otherwise: BIND
+/// rejects a quoted duration, so an unsafe value fails closed.
+fn duration_or_quoted(s: &str) -> String {
+    if is_duration(s) {
+        return s.to_owned();
+    }
+    quoted(s)
+}
+
+/// A DNSSEC algorithm bare when it is a non-empty run of ASCII letters and
+/// digits, quoted otherwise: BIND accepts it only unquoted, so an unsafe value
+/// fails closed.
+fn algorithm_or_quoted(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return s.to_owned();
+    }
+    quoted(s)
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/// Raw `extra` pairs, verbatim (trusted input only).
+fn write_extra(out: &mut String, extra: &[(String, String)], depth: usize, opts: &WriteOptions) {
+    for (k, v) in extra {
+        indent(out, depth, opts);
         if v.is_empty() {
             let _ = writeln!(out, "{k};");
         } else {
             let _ = writeln!(out, "{k} {v};");
         }
     }
-    indent(out, depth, opts);
-    out.push_str("};\n");
 }
-
-// ── Shared helpers ────────────────────────────────────────────────────────────
 
 fn write_opt_aml(
     out: &mut String,

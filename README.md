@@ -51,14 +51,14 @@ files and DNS zone files.
 
 | Capability | Details |
 |---|---|
-| **Parse `named.conf`** | options, zone, view, acl, logging, controls, key, primaries/masters, server |
+| **Parse `named.conf`** | options, zone, view, acl, logging, controls, key, primaries/masters, server, dnssec-policy (BIND 9.18 and 9.20 grammar) |
 | **Parse zone files** | A, AAAA, NS, MX, SOA, CNAME, PTR, HINFO, TXT, SRV, CAA, SSHFP, TLSA, NAPTR, LOC, DS, DNSKEY, RRSIG, NSEC, NSEC3, NSEC3PARAM, HTTPS/SVCB, ANAME/ALIAS, and unknown types; `\DDD` / `\X` escapes decoded |
 | **Nothing dropped silently** | Malformed record data is kept verbatim and flagged by the validator; unparseable zone-file lines are errors naming the line |
 | **Write / format** | Round-trip serialisation with configurable indentation, keyword normalisation and explicit classes |
 | **Injection-safe writer** | Every modelled string is quoted or escaped for its position (RFC 1035 escaping in zone files), so values from untrusted sources cannot inject configuration ([ADR-0003](docs/adr/0003-writer-escaping-contract-and-input-hardening.md)) |
-| **Validate** | Semantic checks (undefined ACLs, duplicate zones, missing SOA/NS, CIDR correctness, …) |
+| **Validate** | Semantic checks (undefined ACLs, duplicate zones, missing SOA/NS, CIDR correctness, DNSSEC policy keys, algorithms and references, …) |
 | **CLI tool** | `parse`, `zone`, `check`, `check-zone`, `fmt`, `convert` subcommands |
-| **Error reporting** | Rich diagnostics via [miette](https://github.com/zkat/miette) |
+| **Error reporting** | Diagnostics via [miette](https://github.com/zkat/miette); its terminal rendering stack is compiled only with the `cli` feature |
 | **Modern keyword aliases** | Automatically rewrite `master` → `primary`, `slave` → `secondary` |
 
 ---

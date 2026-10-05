@@ -116,6 +116,26 @@ if has_warning && !allow_warnings {
 | Zone name > 253 characters | Error |
 | Zone label > 63 characters | Error |
 | Zone label starts or ends with `-` | Warning |
+| Duplicate `dnssec-policy` name | Error |
+| `dnssec-policy` named `default`, `insecure` or `none` | Error |
+| `dnssec-policy` key with an unknown role (kept verbatim) | Error |
+| Unrecognised DNSSEC algorithm (not a mnemonic BIND knows, or not 0-255) | Error |
+| Algorithm with a KSK but no ZSK, or a ZSK but no KSK (a CSK counts as both) | Error |
+| More than one KSK, or more than one ZSK, for one algorithm | Error |
+| Duration or key lifetime that is not a BIND duration (an AST built in code) | Error |
+| Zone whose effective `dnssec-policy` (its own, else its view's, else the global one) is not defined | Error |
+| `dnssec-policy` with no keys (no `keys` clause, or `keys { };`) | Warning |
+| Algorithm BIND 9.20 rejects or deprecates for signing (RSAMD5, DSA, RSASHA1, ...) | Warning |
+| `nsec3param iterations` other than 0 (BIND 9.20 rejects it) | Warning |
+| Other `dnssec-policy` clause kept verbatim because its value is outside hornet's grammar | Warning |
+
+Every `dnssec-policy` Error above is one `named-checkconf` also rejects, on BIND 9.18 and
+9.20 ([ADR-0004](https://github.com/firestoned/hornet/blob/main/docs/adr/0004-typed-dnssec-policy-print-time-and-options-for-bindy.md)),
+so a configuration BIND accepts never has one. A global `dnssec-policy` naming an
+undefined policy is only reported for zones that inherit it, as BIND does. Some checks
+BIND makes are left to it: signature refresh versus validity, key lifetime versus
+rollover time, NSEC3 salt length, and 9.18's rule that a signed zone needs
+`inline-signing` or dynamic updates.
 
 ### Built-in ACLs
 

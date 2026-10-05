@@ -7,8 +7,9 @@
 //! [`ValidationError`]s. Validation never mutates the AST; it only reports findings.
 
 use crate::ast::named_conf::{
-    AddressMatchElement, DnssecValidation, KeyStmt, LogDestination, LoggingBlock, NamedConf,
-    OptionsBlock, Statement, ViewStmt, ZoneStmt, ZoneType,
+    is_duration, AddressMatchElement, DnssecKeyLifetime, DnssecKeyRole, DnssecPolicyStmt,
+    DnssecValidation, KeyStmt, LogDestination, LoggingBlock, NamedConf, OptionsBlock, Statement,
+    ViewStmt, ZoneStmt, ZoneType, BUILTIN_DNSSEC_POLICIES,
 };
 use crate::ast::zone_file::{Entry, RData, ZoneFile, MODELLED_RTYPES};
 use crate::error::{Severity, ValidationError};
@@ -56,9 +57,15 @@ pub fn validate_named_conf(conf: &NamedConf) -> Vec<ValidationError> {
             Statement::Key(key) => {
                 check_key(&mut diags, key);
             }
+            Statement::DnssecPolicy(policy) => {
+                check_dnssec_policy(&mut diags, policy);
+            }
             _ => {}
         }
     }
+
+    check_dnssec_policy_names(&mut diags, conf);
+    check_dnssec_policy_references(&mut diags, conf);
 
     // Duplicate zone names
     let mut seen: Vec<&str> = Vec::new();
@@ -318,6 +325,304 @@ fn check_zone_name(diags: &mut Vec<ValidationError>, name: &str) {
                 location: None,
             });
         }
+    }
+}
+
+// ── dnssec-policy (ADR-0004) ───────────────────────────────────────────────────
+
+/// Clauses hornet types in a `dnssec-policy`. One of these in a policy's
+/// `extra` had a value outside the typed grammar.
+const MODELLED_POLICY_CLAUSES: [&str; 19] = [
+    "keys",
+    "cdnskey",
+    "cds-digest-types",
+    "dnskey-ttl",
+    "inline-signing",
+    "manual-mode",
+    "max-zone-ttl",
+    "nsec3param",
+    "offline-ksk",
+    "parent-ds-ttl",
+    "parent-propagation-delay",
+    "publish-safety",
+    "purge-keys",
+    "retire-safety",
+    "signatures-jitter",
+    "signatures-refresh",
+    "signatures-validity",
+    "signatures-validity-dnskey",
+    "zone-propagation-delay",
+];
+const POLICY_KEYS_CLAUSE: &str = "keys";
+const KEY_ROLES: [&str; 3] = ["csk", "ksk", "zsk"];
+
+/// DNSSEC algorithm mnemonics BIND knows (`dns_secalg_fromtext`), with their
+/// numbers.
+const DNSSEC_ALGORITHMS: [(&str, u8); 18] = [
+    ("RSAMD5", 1),
+    ("DH", 2),
+    ("DSA", 3),
+    ("RSASHA1", 5),
+    ("NSEC3DSA", 6),
+    ("NSEC3RSASHA1", 7),
+    ("RSASHA256", 8),
+    ("RSASHA512", 10),
+    ("ECCGOST", 12),
+    ("ECDSAP256SHA256", 13),
+    ("ECDSA256", 13),
+    ("ECDSAP384SHA384", 14),
+    ("ECDSA384", 14),
+    ("ED25519", 15),
+    ("ED448", 16),
+    ("INDIRECT", 252),
+    ("PRIVATEDNS", 253),
+    ("PRIVATEOID", 254),
+];
+/// Algorithms BIND 9.20 signs with without a deprecation warning.
+const SUPPORTED_SIGNING_ALGORITHMS: [u8; 6] = [8, 10, 13, 14, 15, 16];
+
+/// The algorithm number for a mnemonic (case-insensitive) or a number 0-255.
+fn dnssec_algorithm_number(alg: &str) -> Option<u8> {
+    if let Ok(n) = alg.parse::<u8>() {
+        return Some(n);
+    }
+    DNSSEC_ALGORITHMS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(alg))
+        .map(|&(_, n)| n)
+}
+
+/// Duplicate and reserved policy names.
+fn check_dnssec_policy_names(diags: &mut Vec<ValidationError>, conf: &NamedConf) {
+    let mut seen: Vec<&str> = Vec::new();
+    for stmt in &conf.statements {
+        let Statement::DnssecPolicy(p) = stmt else {
+            continue;
+        };
+        if seen.contains(&p.name.as_str()) {
+            diags.push(error(format!(
+                "Duplicate dnssec-policy declaration: \"{}\"",
+                p.name
+            )));
+        }
+        seen.push(&p.name);
+    }
+}
+
+fn check_dnssec_policy(diags: &mut Vec<ValidationError>, p: &DnssecPolicyStmt) {
+    let ctx = format!("dnssec-policy \"{}\"", p.name);
+    if BUILTIN_DNSSEC_POLICIES.contains(&p.name.as_str()) {
+        diags.push(error(format!(
+            "dnssec-policy name \"{}\" is reserved for a built-in policy",
+            p.name
+        )));
+    }
+    let raw_keys = p
+        .extra
+        .iter()
+        .any(|(k, _)| k.as_str() == POLICY_KEYS_CLAUSE);
+    if !raw_keys && p.keys.as_ref().map_or(true, Vec::is_empty) {
+        diags.push(warning(format!("{ctx} has no keys")));
+    }
+    check_policy_extra(diags, &ctx, p);
+    check_policy_keys(diags, &ctx, p);
+    check_policy_durations(diags, &ctx, p);
+    if let Some(iterations) = p.nsec3param.as_ref().and_then(|n| n.iterations) {
+        if iterations != 0 {
+            diags.push(warning(format!(
+                "{ctx}: nsec3param iterations {iterations} is rejected by BIND 9.20 (must be 0)"
+            )));
+        }
+    }
+}
+
+/// Modelled clauses kept verbatim. An unknown key role is an Error (BIND
+/// rejects it); anything else outside hornet's grammar is a Warning.
+fn check_policy_extra(diags: &mut Vec<ValidationError>, ctx: &str, p: &DnssecPolicyStmt) {
+    for (key, raw) in &p.extra {
+        if !MODELLED_POLICY_CLAUSES.contains(&key.as_str()) {
+            continue;
+        }
+        if key.as_str() == POLICY_KEYS_CLAUSE {
+            let unknown = unknown_key_roles(raw);
+            if !unknown.is_empty() {
+                for role in unknown {
+                    diags.push(error(format!("{ctx}: unknown key role \"{role}\"")));
+                }
+                continue;
+            }
+        }
+        diags.push(warning(format!(
+            "{ctx}: `{key} {raw}` is not valid {key} syntax; kept verbatim"
+        )));
+    }
+}
+
+/// The first word of each `;`-separated entry of a raw `{ … }` keys block that
+/// is not a key role.
+fn unknown_key_roles(raw: &str) -> Vec<&str> {
+    let Some(body) = raw.strip_prefix('{') else {
+        return Vec::new();
+    };
+    body.split(';')
+        .filter_map(|entry| entry.split_whitespace().next())
+        .filter(|word| *word != "}")
+        .filter(|word| !KEY_ROLES.iter().any(|r| r.eq_ignore_ascii_case(word)))
+        .collect()
+}
+
+/// Algorithms, and BIND's rule of exactly one KSK-capable and one ZSK-capable
+/// key per algorithm.
+fn check_policy_keys(diags: &mut Vec<ValidationError>, ctx: &str, p: &DnssecPolicyStmt) {
+    let Some(keys) = &p.keys else {
+        return;
+    };
+    // (algorithm label, KSK-capable count, ZSK-capable count), in first-seen order.
+    let mut per_algorithm: Vec<(String, usize, usize)> = Vec::new();
+    for key in keys {
+        let number = dnssec_algorithm_number(&key.algorithm);
+        match number {
+            None => diags.push(error(format!(
+                "{ctx}: unknown DNSSEC algorithm \"{}\"",
+                key.algorithm
+            ))),
+            Some(n) if !SUPPORTED_SIGNING_ALGORITHMS.contains(&n) => diags.push(warning(format!(
+                "{ctx}: algorithm \"{}\" is deprecated or not supported for signing by BIND 9.20",
+                key.algorithm
+            ))),
+            Some(_) => {}
+        }
+        let label = number.map_or_else(|| key.algorithm.clone(), |n| n.to_string());
+        let ksk = usize::from(key.role != DnssecKeyRole::Zsk);
+        let zsk = usize::from(key.role != DnssecKeyRole::Ksk);
+        match per_algorithm.iter_mut().find(|(l, _, _)| *l == label) {
+            Some(entry) => {
+                entry.1 += ksk;
+                entry.2 += zsk;
+            }
+            None => per_algorithm.push((label, ksk, zsk)),
+        }
+    }
+    for (label, ksk, zsk) in per_algorithm {
+        if ksk == 0 {
+            diags.push(error(format!(
+                "{ctx}: algorithm {label} has a ZSK but no KSK"
+            )));
+        }
+        if zsk == 0 {
+            diags.push(error(format!(
+                "{ctx}: algorithm {label} has a KSK but no ZSK"
+            )));
+        }
+        if ksk > 1 {
+            diags.push(error(format!(
+                "{ctx}: algorithm {label} has more than one KSK"
+            )));
+        }
+        if zsk > 1 {
+            diags.push(error(format!(
+                "{ctx}: algorithm {label} has more than one ZSK"
+            )));
+        }
+    }
+}
+
+/// Every duration field and key lifetime must be a BIND duration. Only an AST
+/// built by a program can break this (the parser keeps such values in `extra`).
+fn check_policy_durations(diags: &mut Vec<ValidationError>, ctx: &str, p: &DnssecPolicyStmt) {
+    let lifetimes = p.keys.iter().flatten().filter_map(|k| match &k.lifetime {
+        DnssecKeyLifetime::Duration(d) => Some(("key lifetime", d)),
+        DnssecKeyLifetime::Unlimited => None,
+    });
+    let fields = [
+        ("dnskey-ttl", &p.dnskey_ttl),
+        ("max-zone-ttl", &p.max_zone_ttl),
+        ("parent-ds-ttl", &p.parent_ds_ttl),
+        ("parent-propagation-delay", &p.parent_propagation_delay),
+        ("publish-safety", &p.publish_safety),
+        ("purge-keys", &p.purge_keys),
+        ("retire-safety", &p.retire_safety),
+        ("signatures-jitter", &p.signatures_jitter),
+        ("signatures-refresh", &p.signatures_refresh),
+        ("signatures-validity", &p.signatures_validity),
+        ("signatures-validity-dnskey", &p.signatures_validity_dnskey),
+        ("zone-propagation-delay", &p.zone_propagation_delay),
+    ];
+    let set_fields = fields
+        .into_iter()
+        .filter_map(|(name, value)| value.as_ref().map(|v| (name, v)));
+    for (name, value) in lifetimes.chain(set_fields) {
+        if !is_duration(value) {
+            diags.push(error(format!(
+                "{ctx}: {name} \"{value}\" is not a BIND duration"
+            )));
+        }
+    }
+}
+
+/// Every zone's effective `dnssec-policy` (its own, else its view's, else the
+/// global one) must be a built-in or a defined policy. BIND checks this for
+/// every zone type, and only for policies a zone actually uses.
+fn check_dnssec_policy_references(diags: &mut Vec<ValidationError>, conf: &NamedConf) {
+    let mut defined: Vec<&str> = BUILTIN_DNSSEC_POLICIES.to_vec();
+    let mut global: Option<&str> = None;
+    for stmt in &conf.statements {
+        match stmt {
+            Statement::DnssecPolicy(p) => defined.push(&p.name),
+            Statement::Options(o) => global = o.dnssec_policy.as_deref().or(global),
+            _ => {}
+        }
+    }
+    let mut check = |zone: &ZoneStmt, inherited: Option<&str>| {
+        let Some(name) = zone.options.dnssec_policy.as_deref().or(inherited) else {
+            return;
+        };
+        if !defined.contains(&name) {
+            diags.push(error(format!(
+                "Zone \"{}\" uses undefined dnssec-policy \"{name}\"",
+                zone.name
+            )));
+        }
+    };
+    for stmt in &conf.statements {
+        match stmt {
+            Statement::Zone(z) => check(z, global),
+            Statement::View(v) => {
+                let view_policy = v
+                    .options
+                    .extra
+                    .iter()
+                    .find(|(k, _)| k.as_str() == "dnssec-policy")
+                    .map(|(_, raw)| unquote(raw));
+                for z in &v.options.zones {
+                    check(z, view_policy.or(global));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A raw value with its surrounding double quotes removed, if it has them.
+fn unquote(raw: &str) -> &str {
+    raw.strip_prefix('"')
+        .and_then(|r| r.strip_suffix('"'))
+        .unwrap_or(raw)
+}
+
+fn error(message: String) -> ValidationError {
+    ValidationError {
+        severity: Severity::Error,
+        message,
+        location: None,
+    }
+}
+
+fn warning(message: String) -> ValidationError {
+    ValidationError {
+        severity: Severity::Warning,
+        message,
+        location: None,
     }
 }
 

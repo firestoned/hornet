@@ -162,4 +162,117 @@ mod tests {
         let conf = NamedConf::default();
         assert!(conf.statements.is_empty());
     }
+
+    // ── print-time ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_print_time_display() {
+        use super::super::PrintTime;
+        let cases = [
+            (PrintTime::Yes, "yes"),
+            (PrintTime::No, "no"),
+            (PrintTime::Local, "local"),
+            (PrintTime::Iso8601, "iso8601"),
+            (PrintTime::Iso8601Utc, "iso8601-utc"),
+        ];
+        for (value, text) in cases {
+            assert_eq!(value.to_string(), text);
+        }
+    }
+
+    // ── dnssec-policy ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_dnssec_key_role_display() {
+        use super::super::DnssecKeyRole;
+        assert_eq!(DnssecKeyRole::Csk.to_string(), "csk");
+        assert_eq!(DnssecKeyRole::Ksk.to_string(), "ksk");
+        assert_eq!(DnssecKeyRole::Zsk.to_string(), "zsk");
+    }
+
+    #[test]
+    fn test_dnssec_policy_default_is_empty() {
+        let p = super::super::DnssecPolicyStmt::default();
+        assert!(p.name.is_empty());
+        assert!(p.keys.is_none());
+        assert!(p.nsec3param.is_none());
+        assert!(p.extra.is_empty());
+    }
+
+    #[test]
+    fn test_builtin_dnssec_policies() {
+        assert_eq!(
+            super::super::BUILTIN_DNSSEC_POLICIES,
+            ["default", "insecure", "none"]
+        );
+    }
+
+    /// Every value here was checked against `named-checkconf` on BIND 9.18 and
+    /// 9.20 (ADR-0004).
+    #[test]
+    fn test_is_duration_accepts_what_bind_accepts() {
+        use super::super::is_duration;
+        for ok in [
+            "0",
+            "300",
+            "4294967295",
+            "5d",
+            "12h",
+            "30m",
+            "45s",
+            "1w",
+            "2W",
+            "1w2d",
+            "1d1d",
+            "P",
+            "PT",
+            "P1D",
+            "P1DT",
+            "P30D",
+            "PT1H",
+            "PT5M",
+            "pt5m",
+            "p1dt2h3m4s",
+            "P1Y",
+            "P1M",
+            "P1Y2M3D",
+            "P1W",
+            "P1Y2M3DT4H5M6S",
+        ] {
+            assert!(is_duration(ok), "{ok} should be a duration");
+        }
+    }
+
+    #[test]
+    fn test_is_duration_rejects_what_bind_rejects() {
+        use super::super::is_duration;
+        for bad in [
+            "",
+            "1y",
+            "1h30",
+            "4294967296",
+            "4294967296s",
+            "5000000000w",
+            "99999999999999999w",
+            "PD",
+            "PTH",
+            "99999999999999999999",
+            "P1W2D",
+            "P1Y2M3W",
+            "P1D2Y",
+            "PT1D",
+            "P1H",
+            "PT1H2H",
+            "PX",
+            "P1",
+            "d",
+            "unlimited",
+            "5d;",
+            "5 d",
+            "\"5d\"",
+            "-5",
+        ] {
+            assert!(!is_duration(bad), "{bad:?} should not be a duration");
+        }
+    }
 }

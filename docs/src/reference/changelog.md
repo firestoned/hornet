@@ -4,6 +4,52 @@ All notable changes to Hornet are documented here.
 
 ---
 
+## [0.3.0]: Unreleased: rendering what bindy emits
+
+0.3.0 closes the four gaps that kept the bindy operator from rendering its BIND9
+configuration through hornet's writer
+([ADR-0004](https://github.com/firestoned/hornet/blob/main/docs/adr/0004-typed-dnssec-policy-print-time-and-options-for-bindy.md)).
+Every grammar decision was checked with `named-checkconf` on BIND 9.18 and 9.20.
+
+### Breaking changes
+
+- **`LogChannel::print_time` is `Option<PrintTime>`**, not `Option<bool>`. Replace
+  `Some(true)` with `Some(PrintTime::Yes)` and `Some(false)` with
+  `Some(PrintTime::No)`.
+- **`Statement` has a new variant, `DnssecPolicy`.** An exhaustive `match` on
+  `Statement` needs an arm for it. A `dnssec-policy` block that 0.2 returned as
+  `Statement::Unknown { keyword: "dnssec-policy", .. }` is now typed.
+- **`OptionsBlock` has three new fields** (`allow_new_zones`, `key_directory`,
+  `dnssec_policy`). Struct literals without `..Default::default()` must add them,
+  and code that looked for these options in `OptionsBlock::extra` must read the
+  fields instead.
+- **Library builds no longer enable `miette/fancy`.** It is enabled only by the
+  `cli` feature. A program that renders hornet errors with miette's graphical
+  handler must enable `fancy` on its own `miette` dependency. The CLI's output is
+  unchanged.
+
+### Added
+
+- `print-time local | iso8601 | iso8601-utc` (BIND 9.16 and later); a `logging`
+  block using them is now typed instead of falling back to `Statement::Unknown`.
+- `Statement::DnssecPolicy(DnssecPolicyStmt)` with `DnssecPolicyKey`,
+  `DnssecKeyRole`, `DnssecKeyStorage`, `DnssecKeyLifetime` and `Nsec3Param`,
+  covering the BIND 9.18 and 9.20 grammar; unmodelled clauses go to the policy's
+  own `extra` raw carrier.
+- `named_conf::is_duration` (the BIND duration grammar) and
+  `named_conf::BUILTIN_DNSSEC_POLICIES`.
+- Typed `allow-new-zones`, `key-directory` and `dnssec-policy` in `options`.
+- Validator checks for `dnssec-policy`: duplicate and reserved names, unknown
+  key roles, unrecognised or deprecated algorithms, KSK / ZSK coverage per
+  algorithm, invalid durations, `nsec3param iterations` other than 0, and zones
+  whose effective policy is undefined.
+- The writer quotes policy names, `key-store` names and digest types, and
+  writes durations and algorithms bare only when they match their grammar.
+- e2e: fixtures for every new construct, and a `min-bind` marker for fixtures
+  that need BIND 9.20.
+
+---
+
 ## [0.2.0]: Hardening release
 
 0.2.0 fixes every finding from hornet's first threat-model pass (see the

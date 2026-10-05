@@ -980,4 +980,350 @@ mod tests {
         let diags = validate_zone_file(&zone_with_unknown("SPF", "\"v=spf1 -all\""));
         assert!(!diags.iter().any(|d| d.message.contains("kept verbatim")));
     }
+
+    // ── dnssec-policy (ADR-0004) ───────────────────────────────────────────────
+
+    use crate::ast::named_conf::{
+        DnssecKeyLifetime, DnssecKeyRole, DnssecPolicyKey, DnssecPolicyStmt, Nsec3Param,
+    };
+    use crate::error::ValidationError;
+
+    fn check(text: &str) -> Vec<ValidationError> {
+        let conf = crate::parser::parse_named_conf(text).expect("parse failed");
+        validate_named_conf(&conf)
+    }
+
+    /// The single finding whose message contains `needle`.
+    fn finding<'a>(diags: &'a [ValidationError], needle: &str) -> &'a ValidationError {
+        let hits: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .collect();
+        assert_eq!(hits.len(), 1, "{needle}: {diags:?}");
+        hits[0]
+    }
+
+    fn no_finding(diags: &[ValidationError], needle: &str) {
+        assert!(
+            !diags.iter().any(|d| d.message.contains(needle)),
+            "{needle}: {diags:?}"
+        );
+    }
+
+    const KSK_ZSK: &str =
+        "keys { ksk lifetime unlimited algorithm 13; zsk lifetime 90d algorithm 13; };";
+
+    fn policy_text(name: &str, body: &str) -> String {
+        format!("dnssec-policy \"{name}\" {{ {body} }};\n")
+    }
+
+    #[test]
+    fn test_bindy_policy_is_clean() {
+        let diags = check(&policy_text(
+            "bindy",
+            "keys { ksk lifetime 365d algorithm ECDSAP256SHA256; \
+             zsk lifetime 90d algorithm ECDSAP256SHA256; }; \
+             nsec3param iterations 0 optout no salt-length 0; \
+             signatures-refresh 5d; signatures-validity 30d; \
+             signatures-validity-dnskey 30d; zone-propagation-delay 300; \
+             parent-propagation-delay 3600; max-zone-ttl 86400;",
+        ));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn test_csk_alone_and_multiple_algorithms_are_clean() {
+        let diags = check(&policy_text(
+            "p",
+            "keys { csk lifetime unlimited algorithm ecdsa256; \
+             ksk lifetime unlimited algorithm 8 2048; zsk lifetime P90D algorithm RSASHA256; };",
+        ));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn test_duplicate_policy_name_is_error() {
+        let text = policy_text("p", KSK_ZSK) + &policy_text("p", KSK_ZSK);
+        let diags = check(&text);
+        let d = finding(&diags, "Duplicate dnssec-policy declaration: \"p\"");
+        assert_eq!(d.severity, Severity::Error);
+    }
+
+    #[test]
+    fn test_reserved_policy_names_are_errors() {
+        for name in ["default", "insecure", "none"] {
+            let diags = check(&policy_text(name, KSK_ZSK));
+            let d = finding(&diags, "is reserved for a built-in policy");
+            assert_eq!(d.severity, Severity::Error);
+            assert!(d.message.contains(&format!("\"{name}\"")), "{}", d.message);
+        }
+    }
+
+    #[test]
+    fn test_policy_without_keys_warns() {
+        for body in ["", "keys { };"] {
+            let diags = check(&policy_text("p", body));
+            let d = finding(&diags, "dnssec-policy \"p\" has no keys");
+            assert_eq!(d.severity, Severity::Warning, "{body}");
+        }
+    }
+
+    #[test]
+    fn test_unknown_key_role_is_error() {
+        let diags = check(&policy_text(
+            "p",
+            "keys { foo lifetime 1d algorithm 13; ksk lifetime 1d algorithm 13; };",
+        ));
+        let d = finding(&diags, "unknown key role \"foo\"");
+        assert_eq!(d.severity, Severity::Error);
+        // Reported once, not also as a generic verbatim clause, nor as "no keys".
+        no_finding(&diags, "kept verbatim");
+        no_finding(&diags, "has no keys");
+    }
+
+    #[test]
+    fn test_verbatim_keys_with_known_roles_warns() {
+        let diags = check(&policy_text(
+            "p",
+            "keys { csk lifetime unlimited algorithm \"13\"; };",
+        ));
+        let d = finding(&diags, "kept verbatim");
+        assert_eq!(d.severity, Severity::Warning);
+        assert!(d.message.contains("keys"), "{}", d.message);
+        no_finding(&diags, "has no keys");
+    }
+
+    #[test]
+    fn test_verbatim_keys_without_braces_warns() {
+        let diags = check(&policy_text("p", "keys csk;"));
+        assert_eq!(finding(&diags, "kept verbatim").severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_modelled_clause_kept_verbatim_warns() {
+        let diags = check(&policy_text("p", &format!("{KSK_ZSK} cdnskey maybe;")));
+        let d = finding(&diags, "kept verbatim");
+        assert_eq!(d.severity, Severity::Warning);
+        assert!(d.message.contains("cdnskey maybe"), "{}", d.message);
+    }
+
+    #[test]
+    fn test_unmodelled_clause_does_not_warn() {
+        let diags = check(&policy_text("p", &format!("{KSK_ZSK} future-clause 1;")));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn test_unknown_algorithm_is_error() {
+        for alg in ["bogus", "256", "99999999999"] {
+            let diags = check(&policy_text(
+                "p",
+                &format!("keys {{ csk lifetime unlimited algorithm {alg}; }};"),
+            ));
+            let d = finding(&diags, "unknown DNSSEC algorithm");
+            assert_eq!(d.severity, Severity::Error, "{alg}");
+            assert!(d.message.contains(alg), "{}", d.message);
+        }
+    }
+
+    #[test]
+    fn test_unsupported_or_deprecated_algorithm_warns() {
+        for alg in ["dsa", "RSAMD5", "rsasha1", "nsec3rsasha1", "255", "3"] {
+            let diags = check(&policy_text(
+                "p",
+                &format!("keys {{ csk lifetime unlimited algorithm {alg}; }};"),
+            ));
+            let d = finding(&diags, "deprecated or not supported for signing");
+            assert_eq!(d.severity, Severity::Warning, "{alg}");
+        }
+    }
+
+    #[test]
+    fn test_ksk_without_zsk_is_error() {
+        let diags = check(&policy_text(
+            "p",
+            "keys { ksk lifetime unlimited algorithm ecdsap256sha256; };",
+        ));
+        let d = finding(&diags, "has a KSK but no ZSK");
+        assert_eq!(d.severity, Severity::Error);
+        assert!(d.message.contains("algorithm 13"), "{}", d.message);
+    }
+
+    #[test]
+    fn test_zsk_without_ksk_is_error() {
+        let diags = check(&policy_text(
+            "p",
+            "keys { zsk lifetime unlimited algorithm bogus; };",
+        ));
+        let d = finding(&diags, "has a ZSK but no KSK");
+        assert_eq!(d.severity, Severity::Error);
+        assert!(d.message.contains("algorithm bogus"), "{}", d.message);
+    }
+
+    #[test]
+    fn test_multiple_ksk_or_zsk_per_algorithm_is_error() {
+        let diags = check(&policy_text(
+            "p",
+            "keys { csk lifetime unlimited algorithm 13; ksk lifetime unlimited algorithm ecdsa256; \
+             zsk lifetime unlimited algorithm ECDSAP256SHA256; };",
+        ));
+        assert_eq!(
+            finding(&diags, "has more than one KSK").severity,
+            Severity::Error
+        );
+        assert_eq!(
+            finding(&diags, "has more than one ZSK").severity,
+            Severity::Error
+        );
+    }
+
+    #[test]
+    fn test_iterations_other_than_zero_warns() {
+        let diags = check(&policy_text(
+            "p",
+            &format!("{KSK_ZSK} nsec3param iterations 5;"),
+        ));
+        let d = finding(&diags, "nsec3param iterations 5");
+        assert_eq!(d.severity, Severity::Warning);
+        let clean = check(&policy_text("p", &format!("{KSK_ZSK} nsec3param;")));
+        assert!(clean.is_empty(), "{clean:?}");
+    }
+
+    /// An AST built by a program (not parsed) can hold durations BIND rejects;
+    /// the writer quotes them, and the validator says so first.
+    #[test]
+    fn test_invalid_durations_in_ast_are_errors() {
+        let bad = || Some("1y".to_string());
+        let policy = DnssecPolicyStmt {
+            name: "p".to_string(),
+            keys: Some(vec![DnssecPolicyKey {
+                role: DnssecKeyRole::Csk,
+                storage: None,
+                lifetime: DnssecKeyLifetime::Duration("1y".to_string()),
+                algorithm: "13".to_string(),
+                tag_range: None,
+                bits: None,
+            }]),
+            dnskey_ttl: bad(),
+            max_zone_ttl: bad(),
+            parent_ds_ttl: bad(),
+            parent_propagation_delay: bad(),
+            publish_safety: bad(),
+            purge_keys: bad(),
+            retire_safety: bad(),
+            signatures_jitter: bad(),
+            signatures_refresh: bad(),
+            signatures_validity: bad(),
+            signatures_validity_dnskey: bad(),
+            zone_propagation_delay: bad(),
+            nsec3param: Some(Nsec3Param::default()),
+            ..Default::default()
+        };
+        let diags = validate_named_conf(&NamedConf {
+            statements: vec![Statement::DnssecPolicy(policy)],
+        });
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("is not a BIND duration"))
+            .collect();
+        assert_eq!(errors.len(), 13, "{diags:?}");
+        assert!(errors.iter().all(|d| d.severity == Severity::Error));
+        for clause in [
+            "key lifetime",
+            "dnskey-ttl",
+            "max-zone-ttl",
+            "parent-ds-ttl",
+            "parent-propagation-delay",
+            "publish-safety",
+            "purge-keys",
+            "retire-safety",
+            "signatures-jitter",
+            "signatures-refresh",
+            "signatures-validity ",
+            "signatures-validity-dnskey",
+            "zone-propagation-delay",
+        ] {
+            assert!(
+                errors.iter().any(|d| d.message.contains(clause)),
+                "{clause}: {errors:?}"
+            );
+        }
+    }
+
+    // ── dnssec-policy references from zones (ADR-0004) ─────────────────────────
+
+    const ZONE: &str = r#"zone "a.example" { type primary; file "a"; inline-signing yes; "#;
+
+    #[test]
+    fn test_zone_referencing_defined_or_builtin_policy_is_clean() {
+        for name in ["p", "default", "insecure", "none"] {
+            let text = policy_text("p", KSK_ZSK) + ZONE + &format!("dnssec-policy \"{name}\"; }};");
+            let diags = check(&text);
+            no_finding(&diags, "undefined dnssec-policy");
+        }
+    }
+
+    #[test]
+    fn test_zone_referencing_undefined_policy_is_error() {
+        let diags = check(&format!("{ZONE} dnssec-policy \"nope\"; }};"));
+        let d = finding(&diags, "uses undefined dnssec-policy \"nope\"");
+        assert_eq!(d.severity, Severity::Error);
+        assert!(d.message.contains("a.example"), "{}", d.message);
+    }
+
+    #[test]
+    fn test_zone_inheriting_undefined_global_policy_is_error() {
+        let diags = check(&format!(
+            "options {{ dnssec-policy \"nope\"; }};\n{ZONE} }};"
+        ));
+        assert_eq!(
+            finding(&diags, "uses undefined dnssec-policy \"nope\"").severity,
+            Severity::Error
+        );
+    }
+
+    #[test]
+    fn test_undefined_global_policy_without_zones_is_clean() {
+        let diags = check("options { dnssec-policy \"nope\"; };");
+        no_finding(&diags, "undefined dnssec-policy");
+    }
+
+    #[test]
+    fn test_zone_own_policy_overrides_undefined_global_policy() {
+        let diags = check(&format!(
+            "options {{ dnssec-policy \"nope\"; }};\n{ZONE} dnssec-policy none; }};"
+        ));
+        no_finding(&diags, "undefined dnssec-policy");
+    }
+
+    #[test]
+    fn test_view_policy_overrides_global_and_is_checked() {
+        let ok = check(
+            "options { dnssec-policy \"nope\"; };\n\
+             view \"v\" { match-clients { any; }; dnssec-policy \"insecure\"; \
+             zone \"a.example\" { type primary; file \"a\"; }; };",
+        );
+        no_finding(&ok, "undefined dnssec-policy");
+        let bad = check(
+            "view \"v\" { match-clients { any; }; dnssec-policy missing; \
+             zone \"a.example\" { type primary; file \"a\"; }; };",
+        );
+        assert_eq!(
+            finding(&bad, "uses undefined dnssec-policy \"missing\"").severity,
+            Severity::Error
+        );
+    }
+
+    #[test]
+    fn test_zone_in_view_inherits_global_policy() {
+        let diags = check(
+            "options { dnssec-policy \"nope\"; };\n\
+             view \"v\" { match-clients { any; }; \
+             zone \"a.example\" { type primary; file \"a\"; }; };",
+        );
+        assert_eq!(
+            finding(&diags, "uses undefined dnssec-policy \"nope\"").severity,
+            Severity::Error
+        );
+    }
 }
