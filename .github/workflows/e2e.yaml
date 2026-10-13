@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/setup-rust-build@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           target: x86_64-unknown-linux-gnu
 
@@ -63,7 +63,7 @@ jobs:
         run: make build-release
 
       - name: Upload the binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-hornet
           path: target/release/hornet
@@ -74,7 +74,7 @@ jobs:
         run: make coverage-e2e-build
 
       - name: Upload the instrumented binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-hornet-instrumented
           path: target/coverage/e2e/bin/hornet
@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download the binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-hornet
           path: dist
@@ -107,7 +107,7 @@ jobs:
       # when the report is most useful. It never changes the leg's result.
       - name: Download the instrumented binary
         if: ${{ !cancelled() }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-hornet-instrumented
           path: target/coverage/e2e/bin
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload coverage profiles
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-profraw-${{ matrix.bind_version }}
           path: target/coverage/e2e/profraw/
@@ -142,13 +142,13 @@ jobs:
           components: llvm-tools-preview
 
       - name: Download the instrumented binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-hornet-instrumented
           path: target/coverage/e2e/bin
 
       - name: Download coverage profiles
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: e2e-profraw-*
           path: target/coverage/e2e/profraw
@@ -170,7 +170,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload e2e coverage HTML
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-e2e
           path: target/coverage/e2e/html/

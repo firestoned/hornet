@@ -89,7 +89,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Check license headers
-        uses: firestoned/github-actions/security/license-check@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/security/license-check@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           copyright-holder: "Erick Bourgeois, firestoned"
           license-id: "Apache-2.0"
@@ -104,7 +104,7 @@ jobs:
           fetch-depth: 0  # Fetch all history for verification
 
       - name: Verify commits are signed
-        uses: firestoned/github-actions/security/verify-signed-commits@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/security/verify-signed-commits@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # pr on pull_request, release on a published release, push otherwise.
@@ -144,7 +144,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
 
       - name: Run clippy
         run: make clippy
@@ -194,13 +194,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/setup-rust-build@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           target: ${{ matrix.platform.target }}
           cache-key: ${{ github.event_name == 'release' && format('release-{0}', needs.extract-version.outputs.version) || '' }}
 
       - name: Build binary
-        uses: firestoned/github-actions/rust/build-binary@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/build-binary@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           binary-name: hornet
           target: ${{ matrix.platform.target }}
@@ -217,7 +217,7 @@ jobs:
         run: make test-release TARGET=${{ matrix.platform.target }}
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
@@ -264,14 +264,14 @@ jobs:
         run: rustup target add x86_64-apple-darwin
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
 
       - name: Build binary
         shell: bash
         run: make build-target TARGET=${{ matrix.platform.target }}
 
       - name: Upload binary artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
@@ -306,7 +306,7 @@ jobs:
         run: make sbom-stage SBOM_NAME=${{ matrix.platform.artifact_name }}
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom-${{ matrix.platform.artifact_name }}
           path: sbom/${{ matrix.platform.artifact_name }}.cdx.json
@@ -336,10 +336,10 @@ jobs:
           components: llvm-tools-preview
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-llvm-cov
 
@@ -360,7 +360,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload unit coverage HTML
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-unit
           path: target/coverage/unit/html/
@@ -383,7 +383,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload integration coverage HTML
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-integration
           path: target/coverage/integration/html/
@@ -402,7 +402,7 @@ jobs:
 
       - name: Upload combined coverage HTML
         if: ${{ !cancelled() && hashFiles('target/coverage/all/coverage.json') != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-all
           path: target/coverage/all/html/
@@ -422,7 +422,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
 
       - name: Compile benchmarks (no run)
         run: make bench-compile
@@ -449,7 +449,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-registry-
 
       - name: Run cargo-audit (RustSec advisory scan)
-        uses: firestoned/github-actions/rust/security-scan@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/security-scan@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           cargo-audit-version: "0.22.0"
           upload-artifact-name: cargo-audit-report-${{ github.event_name == 'release' && 'release' || github.event_name == 'push' && 'main' || 'pr' }}
@@ -513,7 +513,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download binary artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: ./artifacts/${{ matrix.platform.artifact_name }}
@@ -522,12 +522,12 @@ jobs:
         run: make release-tarball DIR=artifacts/${{ matrix.platform.artifact_name }} NAME=${{ matrix.platform.artifact_name }} BINARY=${{ matrix.platform.binary_name }}
 
       - name: Sign binary tarball with Cosign
-        uses: firestoned/github-actions/security/cosign-sign@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/security/cosign-sign@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
         with:
           artifact-path: artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
 
       - name: Download binary SBOM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: sbom-${{ matrix.platform.artifact_name }}
           path: ./sbom
@@ -540,7 +540,7 @@ jobs:
           sbom-path: sbom/${{ matrix.platform.artifact_name }}.cdx.json
 
       - name: Upload signed artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.platform.artifact_name }}-signed
           path: |
@@ -561,14 +561,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download signed tarballs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: hornet-*-signed
           path: ./subjects
           merge-multiple: true
 
       - name: Download SBOMs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: sbom-*
           path: ./subjects
@@ -606,7 +606,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: ./artifacts
 
@@ -636,7 +636,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
 
       - name: Publish to crates.io
         env:
