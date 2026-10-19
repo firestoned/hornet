@@ -89,7 +89,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Check license headers
-        uses: firestoned/github-actions/security/license-check@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/security/license-check@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           copyright-holder: "Erick Bourgeois, firestoned"
           license-id: "Apache-2.0"
@@ -104,7 +104,7 @@ jobs:
           fetch-depth: 0  # Fetch all history for verification
 
       - name: Verify commits are signed
-        uses: firestoned/github-actions/security/verify-signed-commits@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/security/verify-signed-commits@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # pr on pull_request, release on a published release, push otherwise.
@@ -144,7 +144,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/cache-cargo@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
 
       - name: Run clippy
         run: make clippy
@@ -194,13 +194,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/setup-rust-build@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           target: ${{ matrix.platform.target }}
           cache-key: ${{ github.event_name == 'release' && format('release-{0}', needs.extract-version.outputs.version) || '' }}
 
       - name: Build binary
-        uses: firestoned/github-actions/rust/build-binary@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/build-binary@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           binary-name: hornet
           target: ${{ matrix.platform.target }}
@@ -264,7 +264,7 @@ jobs:
         run: rustup target add x86_64-apple-darwin
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/cache-cargo@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
 
       - name: Build binary
         shell: bash
@@ -295,7 +295,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Generate SBOM
-        uses: firestoned/github-actions/rust/generate-sbom@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/generate-sbom@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           package: hornet-bind9
           target: ${{ matrix.platform.target }}
@@ -336,10 +336,10 @@ jobs:
           components: llvm-tools-preview
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/cache-cargo@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
 
@@ -422,7 +422,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/cache-cargo@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
 
       - name: Compile benchmarks (no run)
         run: make bench-compile
@@ -449,7 +449,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-registry-
 
       - name: Run cargo-audit (RustSec advisory scan)
-        uses: firestoned/github-actions/rust/security-scan@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/security-scan@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           cargo-audit-version: "0.22.0"
           upload-artifact-name: cargo-audit-report-${{ github.event_name == 'release' && 'release' || github.event_name == 'push' && 'main' || 'pr' }}
@@ -522,7 +522,7 @@ jobs:
         run: make release-tarball DIR=artifacts/${{ matrix.platform.artifact_name }} NAME=${{ matrix.platform.artifact_name }} BINARY=${{ matrix.platform.binary_name }}
 
       - name: Sign binary tarball with Cosign
-        uses: firestoned/github-actions/security/cosign-sign@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/security/cosign-sign@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
         with:
           artifact-path: artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
 
@@ -636,7 +636,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@e034489c3a17ffaaaf7f8fb799156ce768d899d5 # v1.3.9
+        uses: firestoned/github-actions/rust/cache-cargo@f52366c4f57f0110012035ac1bcd0bee4075b3e9 # v1.4.0
 
       - name: Publish to crates.io
         env:
